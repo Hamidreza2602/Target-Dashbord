@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-gray-900 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    margin: 0;
+  }
+}
+
+@layer components {
+  .metric-card {
+    @apply bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow;
+  }
+
+  .status-ahead {
+    @apply bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .status-on-track {
+    @apply bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .status-behind {
+    @apply bg-red-100 text-red-800 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 cursor-pointer;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-gray-700 px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 hover:bg-gray-50 transition-colors cursor-pointer;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors cursor-pointer;
+  }
+
+  .input-field {
+    @apply border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+  }
+
+  .driver-row {
+    @apply flex items-center gap-4 py-3 px-4 border-b border-gray-100 hover:bg-gray-50/50;
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-gray-900;
+  }
+
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+  }
+}
