@@ -339,36 +339,38 @@ function CompactDriverRow({
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
 
   return (
-    <div className={`flex items-center gap-2 py-2 px-4 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
-      <div className="w-32 shrink-0">
-        <span className="text-xs font-medium text-gray-700">{driver.label}</span>
-        {hasOverrides && <span className="text-[9px] ml-1 text-blue-500 font-bold">CUSTOM</span>}
+    <div className={`py-2 px-3 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
+      <div className="flex items-center justify-between mb-1">
+        <div>
+          <span className="text-[11px] font-medium text-gray-700">{driver.label}</span>
+          {hasOverrides && <span className="text-[9px] ml-1 text-blue-500 font-bold">CUSTOM</span>}
+        </div>
+        <button onClick={onToggleMonthly} className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
+          {isMonthlyOpen ? 'Close' : 'Monthly'}
+        </button>
       </div>
-      <div className="flex items-center gap-1.5 flex-1 min-w-0">
-        {driver.unit === 'currency' && <span className="text-gray-400 text-xs">$</span>}
+      <div className="flex items-center gap-1.5">
+        {driver.unit === 'currency' && <span className="text-gray-400 text-[10px]">$</span>}
         <input
           type="number"
           value={driver.defaultValue}
           onChange={e => onGlobalChange(parseFloat(e.target.value) || 0)}
-          className="input-field w-20 text-xs py-1.5"
+          className="input-field w-16 text-xs py-1"
           step={driver.step}
           min={driver.min}
           max={driver.max}
         />
-        {driver.unit === 'percent' && <span className="text-gray-400 text-xs">%</span>}
+        {driver.unit === 'percent' && <span className="text-gray-400 text-[10px]">%</span>}
         <input
           type="range"
           value={driver.defaultValue}
           onChange={e => onGlobalChange(parseFloat(e.target.value))}
-          className="flex-1 h-1 accent-blue-500 min-w-[40px]"
+          className="flex-1 h-1 accent-blue-500"
           step={driver.step}
           min={driver.min}
           max={driver.max}
         />
       </div>
-      <button onClick={onToggleMonthly} className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
-        {isMonthlyOpen ? 'Close' : 'Monthly'}
-      </button>
     </div>
   );
 }
