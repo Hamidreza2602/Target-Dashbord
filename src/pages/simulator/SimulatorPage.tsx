@@ -491,49 +491,33 @@ function MonthlyEditorPanel({
     ? historyData[gaugeLastHistKey]
     : driver.defaultValue;
 
-  // Gauge derived values
+  // Target gauge: % change of targetValue vs historical baseline
+  // Moving the gauge re-runs the projection → chart updates immediately
   const GAUGE_MIN = -100;
-  const GAUGE_MAX = 100;
-  const gaugePctChange = gaugeOriginal !== 0
-    ? ((driver.defaultValue - gaugeOriginal) / Math.abs(gaugeOriginal)) * 100
+  const GAUGE_MAX = 200;  // allow up to 3× baseline
+  const tgtPct = gaugeOriginal !== 0
+    ? ((targetValue - gaugeOriginal) / Math.abs(gaugeOriginal)) * 100
     : 0;
-  const gaugeSliderPct = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gaugePctChange));
-  const gaugeThumbTrackPct = (gaugeSliderPct + 100) / 2;
-  const gaugePctLabel = Math.abs(gaugePctChange) < 0.05
-    ? '0%'
-    : `${gaugePctChange > 0 ? '+' : ''}${gaugePctChange.toFixed(1)}%`;
-  const gaugePctColor = gaugePctChange > 0.05
-    ? 'text-emerald-600' : gaugePctChange < -0.05 ? 'text-red-500' : 'text-gray-400';
-  const gaugeTrackBg = Math.abs(gaugePctChange) < 0.05
+  // Map tgtPct to 0-100 track position (center = 0%, i.e., track pos = GAUGE_MIN/(GAUGE_MIN-GAUGE_MAX)*100)
+  const centerTrackPct = (-GAUGE_MIN / (GAUGE_MAX - GAUGE_MIN)) * 100; // ~33.3% for -100..200
+  const tgtTrackPct = Math.max(0, Math.min(100,
+    ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
+  ));
+  const tgtPctLabel = Math.abs(tgtPct) < 0.05 ? '0%' : `${tgtPct > 0 ? '+' : ''}${tgtPct.toFixed(1)}%`;
+  const tgtPctColor = tgtPct > 0.05 ? 'text-emerald-600' : tgtPct < -0.05 ? 'text-red-500' : 'text-gray-400';
+  const tgtTrackBg = Math.abs(tgtPct) < 0.05
     ? '#d1d5db'
-    : gaugePctChange > 0
-      ? `linear-gradient(to right,#d1d5db 0%,#d1d5db 50%,#4ade80 50%,#16a34a ${gaugeThumbTrackPct}%,#d1d5db ${gaugeThumbTrackPct}%,#d1d5db 100%)`
-      : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${gaugeThumbTrackPct}%,#dc2626 ${gaugeThumbTrackPct}%,#fca5a5 50%,#d1d5db 50%,#d1d5db 100%)`;
-  const handleGaugeSlider = (pct: number) => {
-    const raw = gaugeOriginal * (1 + pct / 100);
+    : tgtPct > 0
+      ? `linear-gradient(to right,#d1d5db 0%,#d1d5db ${centerTrackPct}%,#22c55e ${centerTrackPct}%,#16a34a ${tgtTrackPct}%,#d1d5db ${tgtTrackPct}%,#d1d5db 100%)`
+      : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${tgtTrackPct}%,#dc2626 ${tgtTrackPct}%,#fca5a5 ${centerTrackPct}%,#d1d5db ${centerTrackPct}%,#d1d5db 100%)`;
+  const handleTargetGauge = (sliderVal: number) => {
+    // sliderVal is in % space (GAUGE_MIN..GAUGE_MAX)
+    const rawTarget = gaugeOriginal * (1 + sliderVal / 100);
     const step = driver.step ?? 1;
-    const snapped = step >= 1 ? Math.round(raw) : parseFloat(raw.toFixed(1));
+    const snapped = step >= 1 ? Math.round(rawTarget) : parseFloat(rawTarget.toFixed(1));
     const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
-
-    // Scale ALL monthly overrides proportionally so the chart updates immediately
-    const oldGlobal = driver.defaultValue || 1;
-    const scaleFactor = clamped / oldGlobal;
-    if (Math.abs(scaleFactor - 1) > 0.0001) {
-      months.forEach(m => {
-        const cur = effectiveMonthlyValues[m] ?? oldGlobal;
-        const scaled = isInteger
-          ? Math.round(cur * scaleFactor)
-          : parseFloat((cur * scaleFactor).toFixed(1));
-        onMonthChange(m, Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, scaled)));
-      });
-      // Also scale the target end value
-      setTargetValue(prev => {
-        const scaled = prev * scaleFactor;
-        return isInteger ? Math.round(scaled) : parseFloat(scaled.toFixed(1));
-      });
-      setIsDirty(true);
-    }
-    onGlobalChange(clamped);
+    setTargetValue(clamped);
+    runProjection(projType, clamped);
   };
 
   const effectiveMonthlyValues = useMemo(() => {
@@ -799,42 +783,6 @@ function MonthlyEditorPanel({
       {/* Chart */}
       {chartData.length > 0 && (
         <div className="mb-4 bg-white rounded-lg border border-gray-100 p-3">
-          {/* Gauge row — synced with CompactDriverRow number input above */}
-          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
-            <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap shrink-0">
-              {unitLabel === '$' ? '$' : ''}{driver.unit === 'percent' ? '' : ''}
-              {driver.label.split(' ')[0]}:
-            </span>
-            <input
-              type="number"
-              value={isInteger ? Math.round(driver.defaultValue) : parseFloat(driver.defaultValue.toFixed(1))}
-              onChange={e => onGlobalChange(parseFloat(e.target.value) || 0)}
-              className="input-field w-20 text-xs py-0.5 text-center"
-              step={driver.step}
-              min={driver.min}
-              max={driver.max}
-            />
-            {unitLabel && <span className="text-gray-400 text-[10px]">{unitLabel}</span>}
-            <div className="flex-1 flex flex-col">
-              <div className="flex justify-center mb-0.5">
-                <span className={`text-[9px] font-bold tabular-nums ${gaugePctColor}`}>{gaugePctLabel}</span>
-              </div>
-              <div className="relative h-3.5 flex items-center">
-                <div className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
-                  style={{ background: gaugeTrackBg }} />
-                <div className="absolute w-0.5 h-2.5 rounded-full bg-slate-400 pointer-events-none"
-                  style={{ left: '50%', transform: 'translateX(-50%)' }} />
-                <input
-                  type="range"
-                  value={gaugeSliderPct}
-                  min={GAUGE_MIN} max={GAUGE_MAX} step={0.1}
-                  onChange={e => handleGaugeSlider(parseFloat(e.target.value))}
-                  className="delta-slider"
-                />
-              </div>
-            </div>
-          </div>
-
           <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
             <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
             <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
@@ -864,19 +812,40 @@ function MonthlyEditorPanel({
       )}
 
       {/* Projection Controls */}
-      <div className="flex items-center gap-3 mb-4 p-3 bg-white rounded-lg border border-gray-100">
-        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Target end value:</span>
+      <div className="flex items-center gap-2 mb-4 p-3 bg-white rounded-lg border border-gray-100">
+        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Target:</span>
         {unitLabel === '$' && <span className="text-gray-400 text-xs">$</span>}
         <input
           type="number"
           value={targetValue}
-          onChange={e => setTargetValue(parseFloat(e.target.value) || 0)}
-          onKeyDown={e => { if (e.key === 'Enter') { const v = parseFloat((e.target as HTMLInputElement).value) || 0; setTargetValue(v); runProjection(projType, v); } }}
+          onChange={e => { const v = parseFloat(e.target.value) || 0; setTargetValue(v); runProjection(projType, v); }}
           className="input-field w-24 text-xs py-1 text-center"
           step={driver.step}
         />
         {unitLabel === '%' && <span className="text-gray-400 text-xs">%</span>}
-        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap ml-2">Projection:</span>
+
+        {/* Target gauge — % vs historical baseline, auto-reruns projection */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex justify-center mb-0.5">
+            <span className={`text-[9px] font-bold tabular-nums ${tgtPctColor}`}>{tgtPctLabel}</span>
+          </div>
+          <div className="relative h-3.5 flex items-center">
+            <div className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
+              style={{ background: tgtTrackBg }} />
+            {/* Center marker at 0% change */}
+            <div className="absolute w-0.5 h-2.5 rounded-full bg-slate-400 pointer-events-none"
+              style={{ left: `${centerTrackPct}%`, transform: 'translateX(-50%)' }} />
+            <input
+              type="range"
+              value={Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct))}
+              min={GAUGE_MIN} max={GAUGE_MAX} step={isInteger ? 1 : 0.1}
+              onChange={e => handleTargetGauge(parseFloat(e.target.value))}
+              className="delta-slider"
+            />
+          </div>
+        </div>
+
+        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Projection:</span>
         <select value={projType} onChange={e => handleProjTypeChange(e.target.value as ProjType)}
           className="input-field text-xs py-1">
           <option value="linear">Linear</option>
