@@ -495,6 +495,19 @@ function MonthlyEditorPanel({
   const hasHistory = Object.keys(historyData).length > 0;
   const isInteger = (driver.step ?? 0.01) >= 1;
 
+  // When the user drags a dot or edits a cell manually, sync the gauge to the
+  // last forecast month value so the gauge always reflects "where the forecast ends up".
+  // This is display-only (setTargetValue only) — no projection re-run, no store write.
+  const lastForecastMonthKey = months[months.length - 1];
+  const lastForecastVal = lastForecastMonthKey !== undefined
+    ? (driver.monthlyValues[lastForecastMonthKey] ?? driver.defaultValue)
+    : undefined;
+  useEffect(() => {
+    if (lastForecastVal !== undefined) {
+      setTargetValue(lastForecastVal);
+    }
+  }, [lastForecastVal]);
+
   // Baseline for the gauge: last historical value (same as projection startVal)
   const gaugeHistMonths = Object.keys(historyData).sort();
   const gaugeLastHistKey = gaugeHistMonths[gaugeHistMonths.length - 1];
