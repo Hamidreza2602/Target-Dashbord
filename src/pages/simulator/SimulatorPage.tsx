@@ -219,7 +219,7 @@ export default function SimulatorPage() {
           <p className="text-xs text-gray-500 mt-0.5">Adjust drivers to see their impact on forecast outputs</p>
         </div>
 
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           {Object.entries(driversByCategory).map(([category, catDrivers]) => (
             <div key={category} className="card overflow-hidden">
               <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
