@@ -6,9 +6,10 @@ import { exportToCSV, forecastToCSVData } from '../../utils/csv';
 import { categoryLabels } from '../../data/metricDefinitions';
 import { DriverConfig, MetricCategory } from '../../types';
 import { format, parse } from 'date-fns';
+import { DRIVER_HISTORY, computeTrend } from '../../data/driverHistory';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import {
   Save, Copy, Download, RefreshCw, Target, AlertTriangle, ChevronDown, ChevronRight,
@@ -128,11 +129,24 @@ export default function SimulatorPage() {
       {/* Summary Cards */}
       {lastMonth && firstMonth && (
         <div className="grid grid-cols-5 gap-4 mb-5">
-          <SummaryCard label="End Total Rev" value={formatCurrency(lastMonth.totalRevenue)} change={((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100).toFixed(1)} />
+          {/* Total MRR with stream breakdown */}
+          <div className="card p-4">
+            <p className="text-xs text-gray-500 font-medium">Total MRR</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(lastMonth.totalRevenue)}</p>
+            <p className={`text-xs mt-1 ${((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100) >= 0 ? '+' : ''}
+              {((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100).toFixed(1)}% over period
+            </p>
+            <div className="mt-2 pt-2 border-t border-gray-100 flex gap-2 text-[10px] text-gray-500 flex-wrap">
+              <span>Rec <span className="font-semibold text-gray-700">{formatCurrency(lastMonth.mrrRecurring)}</span></span>
+              <span>Pre <span className="font-semibold text-emerald-600">{formatCurrency(lastMonth.mrrPreorder)}</span></span>
+              <span>SMS <span className="font-semibold text-purple-600">{formatCurrency(lastMonth.mrrSMS)}</span></span>
+            </div>
+          </div>
           <SummaryCard label="End Customers" value={formatNumber(lastMonth.customers)} change={((lastMonth.customers - firstMonth.customers) / Math.max(1, firstMonth.customers) * 100).toFixed(1)} />
+          <SummaryCard label="End Free Users" value={formatNumber(lastMonth.freeUsers)} change={((lastMonth.freeUsers - firstMonth.freeUsers) / Math.max(1, firstMonth.freeUsers) * 100).toFixed(1)} />
           <SummaryCard label="End NRR" value={formatPercent(lastMonth.nrr)} />
-          <SummaryCard label="End ARPU" value={formatCurrency(lastMonth.arpuRecurring)} />
-          <SummaryCard label="End CLV" value={formatCurrency(lastMonth.clv)} />
+          <SummaryCard label="End GRR" value={formatPercent(lastMonth.grr)} />
         </div>
       )}
 
@@ -384,70 +398,89 @@ function MonthlyEditorPanel({
   onResetMonth: (month: string) => void;
   onClose: () => void;
 }) {
-  const [targetValue, setTargetValue] = useState<number | null>(null);
+  const [histWindow, setHistWindow] = useState<6 | 12 | 'all'>(12);
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
+  const historyData = DRIVER_HISTORY[driver.key] ?? {};
 
+  // Effective forecast values (monthly overrides or defaultValue)
   const effectiveMonthlyValues = useMemo(() => {
     const result: Record<string, number> = {};
-    const n = months.length;
-    const startVal = driver.defaultValue;
-    const endVal = targetValue ?? driver.defaultValue;
-
-    months.forEach((m, i) => {
-      if (driver.monthlyValues[m] !== undefined) {
-        result[m] = driver.monthlyValues[m];
-      } else if (targetValue !== null) {
-        result[m] = Math.round((startVal + ((i + 1) / n) * (endVal - startVal)) * 100) / 100;
-      } else {
-        result[m] = driver.defaultValue;
-      }
+    months.forEach(m => {
+      result[m] = driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : driver.defaultValue;
     });
     return result;
-  }, [driver.defaultValue, driver.monthlyValues, targetValue, months]);
+  }, [driver.defaultValue, driver.monthlyValues, months]);
 
-  const applyLinearRamp = (target: number) => {
-    setTargetValue(target);
-    const n = months.length;
-    const start = driver.defaultValue;
-    months.forEach((m, i) => {
-      if (driver.monthlyValues[m] === undefined) {
-        const val = Math.round((start + ((i + 1) / n) * (target - start)) * 100) / 100;
-        onMonthChange(m, val);
-      }
+  // Build chart data: historical (solid) + forecast (dashed)
+  const chartData = useMemo(() => {
+    const allHistMonths = Object.keys(historyData).sort();
+    const windowedHist = histWindow === 'all'
+      ? allHistMonths
+      : allHistMonths.slice(-histWindow);
+
+    const histPoints = windowedHist.map(m => ({
+      month: m.substring(5), // MM display
+      fullMonth: m,
+      historical: historyData[m],
+      forecast: null as number | null,
+    }));
+
+    // Junction: last hist month appears in both so the lines connect
+    const lastHistMonth = windowedHist[windowedHist.length - 1];
+    const forecastPoints = months.map((m, i) => ({
+      month: m.substring(5),
+      fullMonth: m,
+      historical: i === 0 && lastHistMonth ? historyData[lastHistMonth] ?? null : null,
+      forecast: effectiveMonthlyValues[m],
+    }));
+
+    return [...histPoints, ...forecastPoints];
+  }, [historyData, histWindow, months, effectiveMonthlyValues]);
+
+  // Apply historical linear trend to all forecast months
+  const applyTrend = () => {
+    const trend = computeTrend(driver.key, months, 6);
+    months.forEach(m => {
+      const val = trend[m];
+      if (val !== undefined) onMonthChange(m, val);
     });
   };
 
-  const resetAll = () => {
-    setTargetValue(null);
-    months.forEach(m => onResetMonth(m));
-  };
+  const resetAll = () => months.forEach(m => onResetMonth(m));
+
+  const hasHistory = Object.keys(historyData).length > 0;
 
   return (
     <div className="border-t-2 border-blue-400 bg-gradient-to-b from-blue-50/60 to-white px-6 py-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-6">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-4">
           <h4 className="text-sm font-semibold text-gray-900">{driver.label}</h4>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">Start:</span>
-              <span className="text-xs font-semibold text-gray-800">{driver.defaultValue}{unitLabel}</span>
+          {hasHistory && (
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="text-gray-400 mr-1">History:</span>
+              {([6, 12, 'all'] as const).map(w => (
+                <button
+                  key={w}
+                  onClick={() => setHistWindow(w)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium ${histWindow === w ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                >
+                  {w === 'all' ? 'All' : `${w}M`}
+                </button>
+              ))}
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">Target:</span>
-              <input
-                type="number"
-                value={targetValue ?? driver.defaultValue}
-                onChange={e => applyLinearRamp(parseFloat(e.target.value) || 0)}
-                className="input-field w-24 text-xs py-1"
-                step={driver.step}
-              />
-              <span className="text-xs text-gray-400">{unitLabel}</span>
-            </div>
-          </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
+          {hasHistory && (
+            <button
+              onClick={applyTrend}
+              className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 font-medium border border-purple-200 px-2 py-0.5 rounded"
+            >
+              Apply Trend
+            </button>
+          )}
           {hasOverrides && (
             <button onClick={resetAll} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700">
               <RotateCcw size={11} /> Reset all
@@ -457,7 +490,57 @@ function MonthlyEditorPanel({
         </div>
       </div>
 
-      {/* Monthly grid - full width, well spaced */}
+      {/* Combined historical + forecast chart */}
+      {chartData.length > 0 && (
+        <div className="mb-4 bg-white rounded-lg border border-gray-100 p-3">
+          <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
+            <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+              <YAxis tick={{ fontSize: 9 }} width={40}
+                tickFormatter={v => unitLabel === '$' ? `$${v}` : `${v}${unitLabel}`}
+              />
+              <Tooltip
+                contentStyle={{ fontSize: 11 }}
+                formatter={(v: any) => [`${unitLabel === '$' ? '$' : ''}${v}${unitLabel !== '$' ? unitLabel : ''}`, '']}
+              />
+              {/* Junction divider */}
+              {months[0] && (
+                <ReferenceLine x={months[0].substring(5)} stroke="#cbd5e1" strokeDasharray="4 2" label={{ value: 'Now', position: 'top', fontSize: 9, fill: '#94a3b8' }} />
+              )}
+              {/* Historical — solid blue */}
+              <Line
+                type="monotone"
+                dataKey="historical"
+                stroke="#3b82f6"
+                strokeWidth={2}
+                dot={{ r: 2, fill: '#3b82f6' }}
+                connectNulls={false}
+                isAnimationActive={false}
+                name="Historical"
+              />
+              {/* Forecast — dashed purple */}
+              <Line
+                type="monotone"
+                dataKey="forecast"
+                stroke="#8b5cf6"
+                strokeWidth={2}
+                strokeDasharray="5 4"
+                dot={{ r: 2, fill: '#8b5cf6' }}
+                connectNulls={false}
+                isAnimationActive={false}
+                name="Forecast"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Monthly input grid — all forecast months */}
       <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(months.length, 12)}, minmax(0, 1fr))` }}>
         {months.slice(0, 12).map(m => {
           const hasOverride = driver.monthlyValues[m] !== undefined;
@@ -469,10 +552,7 @@ function MonthlyEditorPanel({
                 type="number"
                 value={val}
                 onChange={e => onMonthChange(m, parseFloat(e.target.value) || 0)}
-                className={`input-field w-full text-xs text-center py-1.5 px-1 ${
-                  hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' :
-                  targetValue !== null ? 'border-purple-200 bg-purple-50/40' : ''
-                }`}
+                className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
                 step={driver.step}
               />
               {hasOverride && (
@@ -494,10 +574,7 @@ function MonthlyEditorPanel({
                   type="number"
                   value={val}
                   onChange={e => onMonthChange(m, parseFloat(e.target.value) || 0)}
-                  className={`input-field w-full text-xs text-center py-1.5 px-1 ${
-                    hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' :
-                    targetValue !== null ? 'border-purple-200 bg-purple-50/40' : ''
-                  }`}
+                  className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
                   step={driver.step}
                 />
                 {hasOverride && (
@@ -507,12 +584,6 @@ function MonthlyEditorPanel({
             );
           })}
         </div>
-      )}
-
-      {targetValue !== null && (
-        <p className="text-[10px] text-purple-500 mt-2">
-          Linear ramp from {driver.defaultValue}{unitLabel} to {targetValue}{unitLabel} applied. Override individual months as needed.
-        </p>
       )}
     </div>
   );

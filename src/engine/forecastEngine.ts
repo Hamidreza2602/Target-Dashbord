@@ -283,43 +283,40 @@ export function runForecast(input: ForecastInput): ForecastResult {
 }
 
 export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string, DriverConfig> {
+  // Visits and spend are intentionally excluded from the driver panel (used as engine fallbacks only).
   const defs: Array<{
     key: string; label: string; category: string; unit: string;
     baselineKey: string; fallback: number; min?: number; max?: number; step?: number;
   }> = [
     // === Growth ===
-    { key: 'installs',          label: 'Installations',               category: 'growth_adoption',   unit: 'count',    baselineKey: 'installs',          fallback: 1800,  min: 0, max: 10000,  step: 10 },
-    { key: 'visits',            label: 'Visits',                      category: 'growth_adoption',   unit: 'count',    baselineKey: 'visits',            fallback: 51000, min: 0, max: 500000, step: 100 },
+    { key: 'installs',            label: 'Installations',               category: 'growth_adoption', unit: 'count',   baselineKey: 'installs',          fallback: 1958, min: 0, max: 10000, step: 10 },
 
     // === Conversion ===
-    { key: 'user_conv_rate_new', label: 'Conv. Rate New Free→Paid',   category: 'conversion',        unit: 'percent',  baselineKey: '_',                 fallback: 2.3,   min: 0, max: 100,    step: 0.1 },
-    { key: 'conv_rate_old',      label: 'Conv. Rate Old Free→Paid',   category: 'conversion',        unit: 'percent',  baselineKey: '_',                 fallback: 0.5,   min: 0, max: 20,     step: 0.1 },
+    { key: 'user_conv_rate_new',  label: 'Conv. Rate New Free→Paid',    category: 'conversion',      unit: 'percent', baselineKey: '_',                 fallback: 10.47, min: 0, max: 100,  step: 0.1 },
+    { key: 'conv_rate_old',       label: 'Conv. Rate Old Free→Paid',    category: 'conversion',      unit: 'percent', baselineKey: '_',                 fallback: 0.83,  min: 0, max: 20,   step: 0.1 },
 
     // === Free User Churn ===
-    { key: 'free_churn_rate_old', label: 'Free Churn Rate (Old)',     category: 'retention_churn',   unit: 'percent',  baselineKey: 'free_user_churn_rate', fallback: 4.8, min: 0, max: 100,   step: 0.1 },
-    { key: 'free_churn_rate_new', label: 'Free Churn Rate (New)',     category: 'retention_churn',   unit: 'percent',  baselineKey: '_',                 fallback: 30,    min: 0, max: 100,    step: 0.1 },
+    { key: 'free_churn_rate_old', label: 'Free Churn Rate (Old)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 4.92,  min: 0, max: 100,  step: 0.1 },
+    { key: 'free_churn_rate_new', label: 'Free Churn Rate (New)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 30,    min: 0, max: 100,  step: 0.1 },
 
     // === Paid Churn ===
-    { key: 'paid_churn_rate_old', label: 'Paid Churn Rate (Old)',     category: 'retention_churn',   unit: 'percent',  baselineKey: 'customer_churn_rate', fallback: 4.5, min: 0, max: 100,    step: 0.1 },
-    { key: 'paid_churn_rate_new', label: 'Paid Churn Rate (New)',     category: 'retention_churn',   unit: 'percent',  baselineKey: '_',                 fallback: 12,    min: 0, max: 100,    step: 0.1 },
+    { key: 'paid_churn_rate_old', label: 'Paid Churn Rate (Old)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 4.69,  min: 0, max: 100,  step: 0.1 },
+    { key: 'paid_churn_rate_new', label: 'Paid Churn Rate (New)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 8.96,  min: 0, max: 100,  step: 0.1 },
 
     // === Back to Free ===
-    { key: 'back_to_free_rate_old', label: 'Back to Free Rate (Old)', category: 'retention_churn',   unit: 'percent',  baselineKey: 'back_to_free_rate', fallback: 1.1,   min: 0, max: 50,     step: 0.1 },
-    { key: 'back_to_free_rate_new', label: 'Back to Free Rate (New)', category: 'retention_churn',   unit: 'percent',  baselineKey: '_',                 fallback: 1.5,   min: 0, max: 50,     step: 0.1 },
+    { key: 'back_to_free_rate_old', label: 'Back to Free Rate (Old)',   category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 1.18,  min: 0, max: 50,   step: 0.1 },
+    { key: 'back_to_free_rate_new', label: 'Back to Free Rate (New)',   category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 1.60,  min: 0, max: 50,   step: 0.1 },
 
-    // === Monetization: Recurring (new customers only — old derived from prevMRR/prevCustomers) ===
-    { key: 'arpu_recurring_new',  label: 'ARPU Recurring (New Cust)', category: 'monetization',      unit: 'currency', baselineKey: 'arpu_recurring',    fallback: 43,    min: 0, max: 500,    step: 0.5 },
+    // === Monetization: Recurring (new customers — old is derived from prevMRR/prevCustomers) ===
+    { key: 'arpu_recurring_new',    label: 'ARPU Recurring (New Cust)', category: 'monetization',    unit: 'currency', baselineKey: 'arpu_recurring',   fallback: 41,    min: 0, max: 500,  step: 0.5 },
 
-    // === Monetization: Preorder ===
-    { key: 'preorder_customers_pct', label: 'Preorder Customers %',   category: 'monetization',      unit: 'percent',  baselineKey: '_',                 fallback: 20,    min: 0, max: 100,    step: 0.5 },
-    { key: 'arpu_preorder',          label: 'ARPU Preorder',          category: 'monetization',      unit: 'currency', baselineKey: 'arpu_transaction_fee', fallback: 5.0, min: 0, max: 100,   step: 0.1 },
+    // === Monetization: Preorder — ARPU = Preorder Rev / (preorderPct × customers) = 60349 / (11.78% × 7980) ≈ $64 ===
+    { key: 'preorder_customers_pct', label: 'Preorder Customers %',     category: 'monetization',    unit: 'percent',  baselineKey: '_',                fallback: 11.78, min: 0, max: 100,  step: 0.5 },
+    { key: 'arpu_preorder',          label: 'ARPU Preorder',            category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 64,    min: 0, max: 500,  step: 1 },
 
-    // === Monetization: SMS ===
-    { key: 'sms_customers_pct',   label: 'SMS Customers %',           category: 'monetization',      unit: 'percent',  baselineKey: '_',                 fallback: 10,    min: 0, max: 100,    step: 0.5 },
-    { key: 'arpu_sms',            label: 'ARPU SMS',                  category: 'monetization',      unit: 'currency', baselineKey: '_',                 fallback: 3.5,   min: 0, max: 100,    step: 0.1 },
-
-    // === Cost ===
-    { key: 'spend',               label: 'Marketing Spend',           category: 'cost',              unit: 'currency', baselineKey: 'spend',             fallback: 5000,  min: 0, max: 100000, step: 100 },
+    // === Monetization: SMS — ARPU = SMS Rev / (smsPct × customers) = 51932 / (33.65% × 7980) ≈ $19 ===
+    { key: 'sms_customers_pct',      label: 'SMS Customers %',          category: 'monetization',    unit: 'percent',  baselineKey: '_',                fallback: 33.65, min: 0, max: 100,  step: 0.5 },
+    { key: 'arpu_sms',               label: 'ARPU SMS',                 category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 19.3,  min: 0, max: 200,  step: 0.5 },
   ];
 
   const result: Record<string, DriverConfig> = {};
