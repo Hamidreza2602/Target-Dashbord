@@ -514,6 +514,25 @@ function MonthlyEditorPanel({
     const step = driver.step ?? 1;
     const snapped = step >= 1 ? Math.round(raw) : parseFloat(raw.toFixed(1));
     const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
+
+    // Scale ALL monthly overrides proportionally so the chart updates immediately
+    const oldGlobal = driver.defaultValue || 1;
+    const scaleFactor = clamped / oldGlobal;
+    if (Math.abs(scaleFactor - 1) > 0.0001) {
+      months.forEach(m => {
+        const cur = effectiveMonthlyValues[m] ?? oldGlobal;
+        const scaled = isInteger
+          ? Math.round(cur * scaleFactor)
+          : parseFloat((cur * scaleFactor).toFixed(1));
+        onMonthChange(m, Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, scaled)));
+      });
+      // Also scale the target end value
+      setTargetValue(prev => {
+        const scaled = prev * scaleFactor;
+        return isInteger ? Math.round(scaled) : parseFloat(scaled.toFixed(1));
+      });
+      setIsDirty(true);
+    }
     onGlobalChange(clamped);
   };
 
@@ -866,34 +885,77 @@ function MonthlyEditorPanel({
         </select>
       </div>
 
-      {/* Monthly input grid */}
-      {[months.slice(0, 12), months.slice(12)].filter(s => s.length > 0).map((slice, si) => (
-        <div key={si} className={`grid gap-2 ${si > 0 ? 'mt-3' : ''}`}
-          style={{ gridTemplateColumns: `repeat(${slice.length}, minmax(0, 1fr))` }}>
-          {slice.map(m => {
-            const hasOverride = driver.monthlyValues[m] !== undefined;
-            const val = effectiveMonthlyValues[m];
-            return (
-              <div key={m} className="flex flex-col items-center">
-                <span className="text-[10px] text-gray-500 mb-1 font-medium">{formatMonthLabel(m)}</span>
-                <input
-                  type="number"
-                  value={isInteger ? Math.round(val) : val}
-                  onChange={e => handleMonthChange(m, isInteger
-                    ? Math.round(parseFloat(e.target.value) || 0)
-                    : (parseFloat(e.target.value) || 0))}
-                  className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
-                  step={isInteger ? 1 : driver.step}
-                />
-                {hasOverride && (
-                  <button onClick={() => { onResetMonth(m); setIsDirty(true); }}
-                    className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+      {/* Monthly grid: historical (gray, read-only) + forecast (editable) */}
+      {(() => {
+        const forecastSlices = [months.slice(0, 12), months.slice(12)].filter(s => s.length > 0);
+        const histSorted = Object.keys(historyData).sort();
+        // Show as many historical months as the first forecast row width
+        const firstRowLen = forecastSlices[0]?.length ?? 12;
+        const histSlice = histSorted.slice(-firstRowLen);
+
+        return forecastSlices.map((slice, si) => (
+          <div key={si} className={si > 0 ? 'mt-4' : ''}>
+            {/* Historical row (only above the first forecast slice) */}
+            {si === 0 && histSlice.length > 0 && (
+              <>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide">Historical</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-[9px] font-semibold text-blue-500 uppercase tracking-wide">Forecast</span>
+                </div>
+                <div className="grid gap-2 mb-1"
+                  style={{ gridTemplateColumns: `repeat(${firstRowLen}, minmax(0, 1fr))` }}>
+                  {/* Pad left if hist has fewer months than firstRowLen */}
+                  {Array.from({ length: firstRowLen - histSlice.length }).map((_, i) => (
+                    <div key={`pad-${i}`} />
+                  ))}
+                  {histSlice.map(hm => {
+                    const hVal = historyData[hm];
+                    const display = isInteger
+                      ? Math.round(hVal).toLocaleString()
+                      : hVal.toFixed(1);
+                    return (
+                      <div key={hm} className="flex flex-col items-center">
+                        <span className="text-[9px] text-gray-400 mb-0.5 font-medium">{formatMonthLabel(hm)}</span>
+                        <div className="w-full text-center text-xs py-1.5 px-1 rounded-md bg-gray-100 text-gray-400 font-medium select-none border border-gray-200">
+                          {display}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* Forecast row (editable) */}
+            <div className="grid gap-2"
+              style={{ gridTemplateColumns: `repeat(${slice.length}, minmax(0, 1fr))` }}>
+              {slice.map(m => {
+                const hasOverride = driver.monthlyValues[m] !== undefined;
+                const val = effectiveMonthlyValues[m];
+                return (
+                  <div key={m} className="flex flex-col items-center">
+                    <span className="text-[10px] text-gray-500 mb-0.5 font-medium">{formatMonthLabel(m)}</span>
+                    <input
+                      type="number"
+                      value={isInteger ? Math.round(val) : val}
+                      onChange={e => handleMonthChange(m, isInteger
+                        ? Math.round(parseFloat(e.target.value) || 0)
+                        : (parseFloat(e.target.value) || 0))}
+                      className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
+                      step={isInteger ? 1 : driver.step}
+                    />
+                    {hasOverride && (
+                      <button onClick={() => { onResetMonth(m); setIsDirty(true); }}
+                        className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ));
+      })()}
     </div>
   );
 }

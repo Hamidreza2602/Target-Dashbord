@@ -65,8 +65,9 @@ interface AppState {
   setForecastAsTarget: (targetPlanId: string) => void;
 }
 
-const defaultStart = format(new Date(), 'yyyy-MM');
-const defaultEnd = format(addMonths(new Date(), 12), 'yyyy-MM');
+// Forecast starts the month AFTER the current month so it never overlaps history
+const defaultStart = format(addMonths(new Date(), 1), 'yyyy-MM');
+const defaultEnd   = format(addMonths(new Date(), 13), 'yyyy-MM'); // 12 months of forecast
 
 export const useAppStore = create<AppState>((set, get) => {
   const initialDrivers = createDefaultDrivers(mockBaseline);
