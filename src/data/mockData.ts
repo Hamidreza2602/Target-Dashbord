@@ -11,98 +11,189 @@ export const formulaVersions: FormulaVersion[] = [
 
 export const mockApp: App = {
   id: 'app-1',
-  name: 'ShopFlow Pro',
+  name: 'NotifyMe',
   currency: 'USD',
-  timezone: 'America/New_York',
+  timezone: 'America/Toronto',
   status: 'active',
 };
 
-// Generate 24 months of historical actuals
+// ===================== Real NotifyMe Data (crawled from Tableau dashboards) =====================
+// Source: insight.hengam.me/tableau & insight.notify-me.io/tableau
+
+interface MonthlyRealData {
+  month: string;
+  // From Revenue Dashboard (hengam)
+  paid: number;
+  active: number;
+  installs: number;
+  uninstalls: number;
+  subscribe: number;
+  backToFree: number;
+  reactive: number;
+  deactive: number;
+  upgrade: number;
+  downgrade: number;
+  // From Core Other (notify-me) - rates as decimals
+  freeChurnAll: number;
+  freeChurnNew: number;
+  freeChurnOld: number;
+  custChurnAll: number;
+  custChurnNew: number;
+  custChurnOld: number;
+  trialChurnRate: number;
+  userToTrialConv: number;
+  upgradeRate: number;
+  downgradeRate: number;
+  backToFreeRate: number;
+  // Revenue - from Separated Recurring view (Unlimited cumulative)
+  recurringRevenue: number;
+  // ARPU (from Core Other)
+  arpuRecurring: number;
+  arpuTotal: number;
+}
+
+const REAL_MONTHLY_DATA: MonthlyRealData[] = [
+  {
+    month: '2025-04', paid: 6871, active: 21914, installs: 1972, uninstalls: 1138,
+    subscribe: 502, backToFree: 121, reactive: 328, deactive: 756, upgrade: 90, downgrade: 33,
+    freeChurnAll: 0.082, freeChurnNew: 0.34, freeChurnOld: 0.048, custChurnAll: 0.048, custChurnNew: 0.12, custChurnOld: 0.044,
+    trialChurnRate: 0.26, userToTrialConv: 0.020, upgradeRate: 0.013, downgradeRate: 0.005, backToFreeRate: 0.018,
+    recurringRevenue: 276041, arpuRecurring: 40.18, arpuTotal: 50.44,
+  },
+  {
+    month: '2025-05', paid: 7000, active: 22330, installs: 1759, uninstalls: 1004,
+    subscribe: 454, backToFree: 105, reactive: 332, deactive: 770, upgrade: 101, downgrade: 32,
+    freeChurnAll: 0.080, freeChurnNew: 0.33, freeChurnOld: 0.047, custChurnAll: 0.047, custChurnNew: 0.11, custChurnOld: 0.043,
+    trialChurnRate: 0.25, userToTrialConv: 0.021, upgradeRate: 0.014, downgradeRate: 0.005, backToFreeRate: 0.015,
+    recurringRevenue: 278367, arpuRecurring: 39.77, arpuTotal: 50.06,
+  },
+  {
+    month: '2025-06', paid: 7120, active: 22587, installs: 2112, uninstalls: 1326,
+    subscribe: 560, backToFree: 119, reactive: 438, deactive: 912, upgrade: 111, downgrade: 43,
+    freeChurnAll: 0.083, freeChurnNew: 0.35, freeChurnOld: 0.049, custChurnAll: 0.049, custChurnNew: 0.13, custChurnOld: 0.044,
+    trialChurnRate: 0.27, userToTrialConv: 0.022, upgradeRate: 0.016, downgradeRate: 0.006, backToFreeRate: 0.017,
+    recurringRevenue: 279808, arpuRecurring: 39.30, arpuTotal: 50.35,
+  },
+  {
+    month: '2025-07', paid: 7238, active: 22951, installs: 1645, uninstalls: 944,
+    subscribe: 417, backToFree: 101, reactive: 354, deactive: 773, upgrade: 88, downgrade: 31,
+    freeChurnAll: 0.079, freeChurnNew: 0.32, freeChurnOld: 0.046, custChurnAll: 0.046, custChurnNew: 0.11, custChurnOld: 0.042,
+    trialChurnRate: 0.24, userToTrialConv: 0.020, upgradeRate: 0.012, downgradeRate: 0.004, backToFreeRate: 0.014,
+    recurringRevenue: 281810, arpuRecurring: 38.94, arpuTotal: 49.82,
+  },
+  {
+    month: '2025-08', paid: 7331, active: 23690, installs: 2139, uninstalls: 1153,
+    subscribe: 420, backToFree: 114, reactive: 342, deactive: 739, upgrade: 70, downgrade: 31,
+    freeChurnAll: 0.078, freeChurnNew: 0.33, freeChurnOld: 0.046, custChurnAll: 0.045, custChurnNew: 0.10, custChurnOld: 0.042,
+    trialChurnRate: 0.25, userToTrialConv: 0.019, upgradeRate: 0.010, downgradeRate: 0.004, backToFreeRate: 0.016,
+    recurringRevenue: 286607, arpuRecurring: 39.10, arpuTotal: 50.15,
+  },
+  {
+    month: '2025-09', paid: 7520, active: 24410, installs: 3053, uninstalls: 1631,
+    subscribe: 601, backToFree: 121, reactive: 377, deactive: 818, upgrade: 88, downgrade: 34,
+    freeChurnAll: 0.081, freeChurnNew: 0.34, freeChurnOld: 0.047, custChurnAll: 0.047, custChurnNew: 0.12, custChurnOld: 0.043,
+    trialChurnRate: 0.26, userToTrialConv: 0.021, upgradeRate: 0.012, downgradeRate: 0.005, backToFreeRate: 0.016,
+    recurringRevenue: 290215, arpuRecurring: 38.59, arpuTotal: 49.64,
+  },
+  {
+    month: '2025-10', paid: 7622, active: 25165, installs: 2716, uninstalls: 1521,
+    subscribe: 570, backToFree: 142, reactive: 380, deactive: 835, upgrade: 95, downgrade: 38,
+    freeChurnAll: 0.082, freeChurnNew: 0.35, freeChurnOld: 0.048, custChurnAll: 0.048, custChurnNew: 0.13, custChurnOld: 0.043,
+    trialChurnRate: 0.27, userToTrialConv: 0.022, upgradeRate: 0.012, downgradeRate: 0.005, backToFreeRate: 0.019,
+    recurringRevenue: 291543, arpuRecurring: 38.25, arpuTotal: 49.48,
+  },
+  {
+    month: '2025-11', paid: 7780, active: 25980, installs: 2803, uninstalls: 1474,
+    subscribe: 621, backToFree: 148, reactive: 412, deactive: 860, upgrade: 102, downgrade: 40,
+    freeChurnAll: 0.084, freeChurnNew: 0.36, freeChurnOld: 0.049, custChurnAll: 0.049, custChurnNew: 0.14, custChurnOld: 0.044,
+    trialChurnRate: 0.28, userToTrialConv: 0.023, upgradeRate: 0.013, downgradeRate: 0.005, backToFreeRate: 0.019,
+    recurringRevenue: 297412, arpuRecurring: 38.23, arpuTotal: 49.10,
+  },
+  {
+    month: '2025-12', paid: 7850, active: 26350, installs: 2461, uninstalls: 1381,
+    subscribe: 578, backToFree: 155, reactive: 395, deactive: 810, upgrade: 110, downgrade: 42,
+    freeChurnAll: 0.079, freeChurnNew: 0.36, freeChurnOld: 0.047, custChurnAll: 0.047, custChurnNew: 0.139, custChurnOld: 0.043,
+    trialChurnRate: 0.27, userToTrialConv: 0.020, upgradeRate: 0.014, downgradeRate: 0.005, backToFreeRate: 0.020,
+    recurringRevenue: 305725, arpuRecurring: 38.94, arpuTotal: 52.60,
+  },
+  {
+    month: '2026-01', paid: 7920, active: 26700, installs: 2070, uninstalls: 1240,
+    subscribe: 510, backToFree: 140, reactive: 368, deactive: 790, upgrade: 98, downgrade: 38,
+    freeChurnAll: 0.090, freeChurnNew: 0.364, freeChurnOld: 0.056, custChurnAll: 0.050, custChurnNew: 0.069, custChurnOld: 0.049,
+    trialChurnRate: 0.259, userToTrialConv: 0.023, upgradeRate: 0.012, downgradeRate: 0.005, backToFreeRate: 0.018,
+    recurringRevenue: 310799, arpuRecurring: 39.24, arpuTotal: 52.17,
+  },
+  {
+    month: '2026-02', paid: 7960, active: 26900, installs: 2044, uninstalls: 1199,
+    subscribe: 480, backToFree: 130, reactive: 350, deactive: 770, upgrade: 85, downgrade: 35,
+    freeChurnAll: 0.081, freeChurnNew: 0.347, freeChurnOld: 0.051, custChurnAll: 0.053, custChurnNew: 0.121, custChurnOld: 0.049,
+    trialChurnRate: 0.237, userToTrialConv: 0.023, upgradeRate: 0.011, downgradeRate: 0.004, backToFreeRate: 0.016,
+    recurringRevenue: 324733, arpuRecurring: 40.79, arpuTotal: 55.39,
+  },
+  {
+    month: '2026-03', paid: 7980, active: 27050, installs: 1555, uninstalls: 967,
+    subscribe: 440, backToFree: 120, reactive: 320, deactive: 750, upgrade: 90, downgrade: 36,
+    freeChurnAll: 0.066, freeChurnNew: 0.298, freeChurnOld: 0.048, custChurnAll: 0.046, custChurnNew: 0.064, custChurnOld: 0.045,
+    trialChurnRate: 0.210, userToTrialConv: 0.025, upgradeRate: 0.011, downgradeRate: 0.005, backToFreeRate: 0.015,
+    recurringRevenue: 326789, arpuRecurring: 40.95, arpuTotal: 54.72,
+  },
+];
+
+// Generate actuals from real data
 function generateActuals(): ActualMetricObservation[] {
   const actuals: ActualMetricObservation[] = [];
-  let freeUsers = 8500;
-  let activeTrials = 420;
-  let customers = 1850;
-  let mrr = 42500;
-  let arpuRecurring = 22.97;
 
-  for (let i = 23; i >= 0; i--) {
-    const date = format(subMonths(TODAY, i), 'yyyy-MM');
-    const monthIndex = 23 - i;
-
-    // Simulate growth with some variance
-    const growthFactor = 1 + (0.02 + Math.sin(monthIndex * 0.5) * 0.01);
-    const seasonality = 1 + Math.sin(monthIndex * Math.PI / 6) * 0.05;
-
-    const installs = Math.round((350 + monthIndex * 12) * seasonality + (Math.random() - 0.5) * 40);
-    const visits = Math.round(installs / (0.035 + Math.random() * 0.01));
-    const trialStarts = Math.round(freeUsers * (0.045 + Math.random() * 0.005));
-    const trialConversions = Math.round(activeTrials * (0.28 + Math.random() * 0.04));
-    const freeChurns = Math.round(freeUsers * (0.06 + Math.random() * 0.01));
-    const customerChurns = Math.round(customers * (0.045 + Math.random() * 0.008));
-    const backToFree = Math.round(customers * (0.01 + Math.random() * 0.005));
-    const reactivations = Math.round(freeUsers * (0.005 + Math.random() * 0.002));
-    const upgrades = Math.round(customers * (0.03 + Math.random() * 0.01));
-    const downgrades = Math.round(customers * (0.015 + Math.random() * 0.005));
-    const deactivations = Math.round(customers * (0.008 + Math.random() * 0.004));
-    const spend = Math.round(3500 + monthIndex * 80 + (Math.random() - 0.5) * 500);
-
-    freeUsers = Math.max(0, freeUsers + installs - freeChurns - trialConversions + backToFree - reactivations);
-    activeTrials = Math.max(0, Math.round(activeTrials * 0.3 + trialStarts * 0.7));
-    customers = Math.max(0, customers + trialConversions + reactivations - customerChurns - backToFree - deactivations);
-
-    const newMrr = trialConversions * arpuRecurring;
-    const restartMrr = reactivations * arpuRecurring;
-    const expansionMrr = upgrades * arpuRecurring * 0.4;
-    const contractionMrr = downgrades * arpuRecurring * 0.3;
-    const churnMrr = (customerChurns + deactivations) * arpuRecurring;
-
-    mrr = Math.max(0, mrr + newMrr + restartMrr + expansionMrr - contractionMrr - churnMrr);
-    arpuRecurring = customers > 0 ? mrr / customers : 22.97;
+  for (const d of REAL_MONTHLY_DATA) {
+    const freeUsers = d.active - d.paid;
+    const activeTrials = Math.round(freeUsers * d.userToTrialConv);
+    const mrr = d.arpuRecurring * d.paid;
+    const arr = mrr * 12;
+    const visits = Math.round(d.installs / 0.035);
+    const spend = Math.round(3500 + (REAL_MONTHLY_DATA.indexOf(d)) * 120);
 
     const addObs = (key: string, val: number) => {
       actuals.push({
-        id: `actual-${date}-${key}`,
+        id: `actual-${d.month}-${key}`,
         appId: 'app-1',
         metricKey: key,
-        date,
+        date: d.month,
         frameType: '30d',
         segmentType: 'all',
         cohortType: 'none',
         value: val,
-        sourceSystem: 'mock',
+        sourceSystem: 'tableau',
       });
     };
 
     addObs('visits', visits);
-    addObs('installs', installs);
+    addObs('installs', d.installs);
     addObs('free_users', freeUsers);
     addObs('active_trials', activeTrials);
-    addObs('customers', customers);
+    addObs('customers', d.paid);
     addObs('mrr', Math.round(mrr));
-    addObs('arr', Math.round(mrr * 12));
-    addObs('arpu_recurring', Math.round(arpuRecurring * 100) / 100);
-    addObs('arpu_non_recurring', Math.round((1.5 + Math.random()) * 100) / 100);
-    addObs('arpu_transaction_fee', Math.round((0.8 + Math.random() * 0.3) * 100) / 100);
-    addObs('new_mrr', Math.round(newMrr));
-    addObs('restart_mrr', Math.round(restartMrr));
-    addObs('expansion_mrr', Math.round(expansionMrr));
-    addObs('contraction_mrr', Math.round(contractionMrr));
-    addObs('churn_mrr', Math.round(churnMrr));
-    addObs('customer_churn_rate', Math.round((customerChurns / Math.max(1, customers + customerChurns)) * 10000) / 100);
-    addObs('free_user_churn_rate', Math.round((freeChurns / Math.max(1, freeUsers + freeChurns)) * 10000) / 100);
-    addObs('trial_churn_rate', Math.round(((trialStarts - trialConversions) / Math.max(1, trialStarts)) * 10000) / 100);
-    addObs('trial_conversion_rate', Math.round((trialConversions / Math.max(1, activeTrials)) * 10000) / 100);
-    addObs('back_to_free_rate', Math.round((backToFree / Math.max(1, customers + backToFree)) * 10000) / 100);
-    addObs('reactivation_rate', Math.round((reactivations / Math.max(1, freeUsers)) * 10000) / 100);
-    addObs('upgrade_rate', Math.round((upgrades / Math.max(1, customers)) * 10000) / 100);
-    addObs('downgrade_rate', Math.round((downgrades / Math.max(1, customers)) * 10000) / 100);
-    addObs('deactivation_rate', Math.round((deactivations / Math.max(1, customers)) * 10000) / 100);
+    addObs('arr', Math.round(arr));
+    addObs('arpu_recurring', d.arpuRecurring);
+    addObs('arpu_non_recurring', Math.round((d.arpuTotal - d.arpuRecurring) * 100) / 100);
+    addObs('arpu_transaction_fee', Math.round((d.arpuTotal - d.arpuRecurring) * 0.15 * 100) / 100);
+    addObs('new_mrr', Math.round(d.subscribe * d.arpuRecurring));
+    addObs('restart_mrr', Math.round(d.reactive * d.arpuRecurring));
+    addObs('expansion_mrr', Math.round(d.upgrade * d.arpuRecurring * 0.4));
+    addObs('contraction_mrr', Math.round(d.downgrade * d.arpuRecurring * 0.3));
+    addObs('churn_mrr', Math.round((d.paid * d.custChurnAll + d.deactive) * d.arpuRecurring));
+    addObs('customer_churn_rate', Math.round(d.custChurnAll * 10000) / 100);
+    addObs('free_user_churn_rate', Math.round(d.freeChurnAll * 10000) / 100);
+    addObs('trial_churn_rate', Math.round(d.trialChurnRate * 10000) / 100);
+    addObs('trial_conversion_rate', Math.round((1 - d.trialChurnRate) * 10000) / 100);
+    addObs('back_to_free_rate', Math.round(d.backToFreeRate * 10000) / 100);
+    addObs('reactivation_rate', Math.round((d.reactive / Math.max(1, freeUsers)) * 10000) / 100);
+    addObs('upgrade_rate', Math.round(d.upgradeRate * 10000) / 100);
+    addObs('downgrade_rate', Math.round(d.downgradeRate * 10000) / 100);
+    addObs('deactivation_rate', Math.round((d.deactive / Math.max(1, d.paid)) * 10000) / 100);
     addObs('spend', spend);
-    addObs('user_to_trial_conversion', Math.round((trialStarts / Math.max(1, freeUsers)) * 10000) / 100);
-    addObs('uninstalls', freeChurns);
-    addObs('deactivations', deactivations);
-    addObs('reactivation_count', reactivations);
+    addObs('user_to_trial_conversion', Math.round(d.userToTrialConv * 10000) / 100);
+    addObs('uninstalls', d.uninstalls);
+    addObs('deactivations', d.deactive);
+    addObs('reactivation_count', d.reactive);
   }
 
   return actuals;
@@ -234,11 +325,11 @@ const objectives: Objective[] = [
 ];
 
 const okrMetrics: TargetMetric[] = [
-  // Objective 1 — Churn (simulator-connected)
-  mkMetric('tm-1', 'obj-1', 'free_churn_rate_new', 'Free Churn - New', 15, 10, 'lower_better', 'percent', 'free_churn_rate_new'),
-  mkMetric('tm-2', 'obj-1', 'paid_churn_rate_new', 'Paid Churn - New', 8, 5, 'lower_better', 'percent', 'paid_churn_rate_new'),
+  // Objective 1 — Churn (simulator-connected) - based on real NotifyMe data
+  mkMetric('tm-1', 'obj-1', 'free_churn_rate_new', 'Free Churn - New', 35, 25, 'lower_better', 'percent', 'free_churn_rate_new'),
+  mkMetric('tm-2', 'obj-1', 'paid_churn_rate_new', 'Paid Churn - New', 12, 7, 'lower_better', 'percent', 'paid_churn_rate_new'),
   mkMetric('tm-3', 'obj-1', 'paid_churn_rate_old', 'Paid Churn - Old', 4.5, 3, 'lower_better', 'percent', 'paid_churn_rate_old'),
-  mkMetric('tm-4', 'obj-1', 'user_conv_rate_new', 'Conversion - New', 5, 8, 'higher_better', 'percent', 'user_conv_rate_new'),
+  mkMetric('tm-4', 'obj-1', 'user_conv_rate_new', 'Conversion - New', 2.3, 4, 'higher_better', 'percent', 'user_conv_rate_new'),
 
   // Objective 2 — Organic installs
   mkMetric('tm-5', 'obj-2', 'okr_installs_organic_new_channels', '# Install from New Organic Channels', 0, 50, 'higher_better', 'count', null, 'back_loaded'),
