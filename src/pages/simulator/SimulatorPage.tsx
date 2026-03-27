@@ -479,11 +479,15 @@ function MonthlyEditorPanel({
   const [projType, setProjType] = useState<ProjType>('linear');
   const [targetValue, setTargetValue] = useState<number>(driver.defaultValue);
 
-  // Keep targetValue in sync with the top driver box (driver.defaultValue)
-  // so the two sections always show the same "current value" baseline.
+  // Keep targetValue in sync with the top driver box (driver.defaultValue).
+  // Also re-run the projection so monthlyValues (which the forecast engine uses)
+  // stay in sync — otherwise changing the top-row slider has no visible effect
+  // because the forecast reads monthlyValues, not defaultValue.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setTargetValue(driver.defaultValue);
-  }, [driver.defaultValue]);
+    runProjection(projType, driver.defaultValue);
+  }, [driver.defaultValue]); // intentionally excludes projType/runProjection to fire only on external value changes
 
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
