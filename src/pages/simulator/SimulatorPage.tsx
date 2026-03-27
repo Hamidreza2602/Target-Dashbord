@@ -355,7 +355,7 @@ function CompactDriverRow({
           type="number"
           value={driver.defaultValue}
           onChange={e => onGlobalChange(parseFloat(e.target.value) || 0)}
-          className="input-field w-16 text-xs py-1"
+          className="input-field w-24 text-xs py-1"
           step={driver.step}
           min={driver.min}
           max={driver.max}
