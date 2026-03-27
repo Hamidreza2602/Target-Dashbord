@@ -476,6 +476,12 @@ function MonthlyEditorPanel({
   const [projType, setProjType] = useState<ProjType>('linear');
   const [targetValue, setTargetValue] = useState<number>(driver.defaultValue);
 
+  // Keep targetValue in sync with the top driver box (driver.defaultValue)
+  // so the two sections always show the same "current value" baseline.
+  useEffect(() => {
+    setTargetValue(driver.defaultValue);
+  }, [driver.defaultValue]);
+
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
   const historyData = DRIVER_HISTORY[driver.key] ?? {};
@@ -508,12 +514,12 @@ function MonthlyEditorPanel({
       ? `linear-gradient(to right,#d1d5db 0%,#d1d5db ${centerTrackPct}%,#22c55e ${centerTrackPct}%,#16a34a ${tgtTrackPct}%,#d1d5db ${tgtTrackPct}%,#d1d5db 100%)`
       : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${tgtTrackPct}%,#dc2626 ${tgtTrackPct}%,#fca5a5 ${centerTrackPct}%,#d1d5db ${centerTrackPct}%,#d1d5db 100%)`;
   const handleTargetGauge = (sliderVal: number) => {
-    // sliderVal is in % space (GAUGE_MIN..GAUGE_MAX)
     const rawTarget = gaugeOriginal * (1 + sliderVal / 100);
     const step = driver.step ?? 1;
     const snapped = step >= 1 ? Math.round(rawTarget) : parseFloat(rawTarget.toFixed(1));
     const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
     setTargetValue(clamped);
+    onGlobalChange(clamped);   // ← keeps top number input in sync
     runProjection(projType, clamped);
   };
 
@@ -792,7 +798,7 @@ function MonthlyEditorPanel({
         <input
           type="number"
           value={targetValue}
-          onChange={e => { const v = parseFloat(e.target.value) || 0; setTargetValue(v); runProjection(projType, v); }}
+          onChange={e => { const v = parseFloat(e.target.value) || 0; setTargetValue(v); onGlobalChange(v); runProjection(projType, v); }}
           className="input-field w-24 text-xs py-1 text-center"
           step={driver.step}
         />

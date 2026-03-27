@@ -130,9 +130,10 @@ export const useAppStore = create<AppState>((set, get) => {
     runSimulation: () => {
       const { drivers, forecastStartDate, forecastEndDate } = get();
       const baseline = get().baselines.find(b => b.id === get().activeBaselineId)!;
-      const start = new Date(forecastStartDate + '-01');
-      const end = new Date(forecastEndDate + '-01');
-      const months = Math.max(1, Math.round((end.getTime() - start.getTime()) / (30.44 * 24 * 60 * 60 * 1000)));
+      // Parse as LOCAL time (not UTC) to avoid timezone-shift → wrong month
+      const [sy, sm] = forecastStartDate.split('-').map(Number);
+      const [ey, em] = forecastEndDate.split('-').map(Number);
+      const months = Math.max(1, (ey - sy) * 12 + (em - sm));
       const result = runForecast({ baseline, startDate: forecastStartDate + '-01', months, drivers });
       set({ forecastMonths: result.months, forecastWarnings: result.warnings });
     },

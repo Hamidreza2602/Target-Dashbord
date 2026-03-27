@@ -74,8 +74,14 @@ export function runForecast(input: ForecastInput): ForecastResult {
     || (customers * (baseline.metricValues.arpu_recurring || 22));
   const arpuFallback = baseline.metricValues.arpu_recurring || 22;
 
+  // Parse startDate as LOCAL time (not UTC) to avoid timezone-shift issues.
+  // 'YYYY-MM-DD' parsed via new Date() is UTC midnight, which in behind-UTC
+  // timezones becomes the previous day locally → wrong month.
+  const [sy, sm, sd] = startDate.split('-').map(Number);
+  const startLocal = new Date(sy, (sm || 1) - 1, sd || 1);
+
   for (let m = 0; m < numMonths; m++) {
-    const monthDate = addMonths(new Date(startDate), m);
+    const monthDate = addMonths(startLocal, m);
     const month = format(monthDate, 'yyyy-MM');
 
     // ═══════════════════════════════════════
