@@ -350,19 +350,38 @@ function CompactDriverRow({
   isMonthlyOpen: boolean;
   onToggleMonthly: () => void;
 }) {
+  // Lock baseline at mount — slider is always relative to this
   const [originalValue] = useState(driver.defaultValue);
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
 
-  const min = driver.min ?? 0;
-  const max = driver.max ?? 100;
-  const range = max - min;
-  const centerPct = range > 0 ? Math.max(0, Math.min(100, ((originalValue - min) / range) * 100)) : 50;
+  // Slider is %-based: -100% .. 0 .. +100% (symmetric → thumb at visual center = no change)
+  const SLIDER_MIN = -100;
+  const SLIDER_MAX = 100;
+
   const currentVal = driver.defaultValue;
   const pctChange = originalValue !== 0
     ? ((currentVal - originalValue) / Math.abs(originalValue)) * 100
     : 0;
-  const pctLabel = pctChange === 0 ? '—' : `${pctChange > 0 ? '+' : ''}${pctChange.toFixed(1)}%`;
-  const pctColor = pctChange > 0.05 ? 'text-emerald-600' : pctChange < -0.05 ? 'text-red-500' : 'text-gray-400';
+  // Clamp to slider range for the thumb position
+  const sliderPct = Math.max(SLIDER_MIN, Math.min(SLIDER_MAX, pctChange));
+
+  const pctLabel = Math.abs(pctChange) < 0.05
+    ? '0%'
+    : `${pctChange > 0 ? '+' : ''}${pctChange.toFixed(1)}%`;
+  const pctColor = pctChange > 0.05
+    ? 'text-emerald-600'
+    : pctChange < -0.05
+      ? 'text-red-500'
+      : 'text-gray-400';
+
+  // Slider → actual value
+  const handleSliderChange = (pct: number) => {
+    const raw = originalValue * (1 + pct / 100);
+    const step = driver.step ?? 1;
+    const snapped = step >= 1 ? Math.round(raw) : Math.round(raw / step) * step;
+    const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
+    onGlobalChange(clamped);
+  };
 
   return (
     <div className={`py-2 px-3 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
@@ -371,13 +390,13 @@ function CompactDriverRow({
           <span className="text-[11px] font-medium text-gray-700">{driver.label}</span>
           {hasOverrides && <span className="text-[9px] ml-1 text-blue-500 font-bold">CUSTOM</span>}
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-semibold tabular-nums ${pctColor}`}>{pctLabel}</span>
-          <button onClick={onToggleMonthly} className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
-            {isMonthlyOpen ? 'Close' : 'Monthly'}
-          </button>
-        </div>
+        <button
+          onClick={onToggleMonthly}
+          className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
+          {isMonthlyOpen ? 'Close' : 'Monthly'}
+        </button>
       </div>
+
       <div className="flex items-center gap-1.5">
         {driver.unit === 'currency' && <span className="text-gray-400 text-[10px]">$</span>}
         <input
@@ -390,29 +409,40 @@ function CompactDriverRow({
           max={driver.max}
         />
         {driver.unit === 'percent' && <span className="text-gray-400 text-[10px]">%</span>}
-        {/* Gradient delta slider */}
-        <div className="relative flex-1 h-4 flex items-center">
-          {/* Colour track */}
-          <div
-            className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
-            style={{
-              background: `linear-gradient(to right, #ef4444 0%, #fbbf24 ${centerPct * 0.5}%, #fbbf24 ${centerPct}%, #86efac ${centerPct + (100 - centerPct) * 0.5}%, #22c55e 100%)`,
-            }}
-          />
-          {/* Center marker (original value position) */}
-          <div
-            className="absolute w-px h-3 bg-slate-600 pointer-events-none"
-            style={{ left: `${centerPct}%`, transform: 'translateX(-50%)' }}
-          />
-          <input
-            type="range"
-            value={driver.defaultValue}
-            onChange={e => onGlobalChange(parseFloat(e.target.value))}
-            className="delta-slider"
-            step={driver.step}
-            min={driver.min}
-            max={driver.max}
-          />
+
+        {/* % change label + gradient delta slider stacked */}
+        <div className="flex-1 flex flex-col">
+          {/* % badge — centered above the track */}
+          <div className="flex justify-center mb-0.5">
+            <span className={`text-[9px] font-bold tabular-nums leading-none ${pctColor}`}>
+              {pctLabel}
+            </span>
+          </div>
+
+          {/* Track + thumb */}
+          <div className="relative h-4 flex items-center">
+            {/* Gradient track (red ← 0 → green, neutral gray at exact center) */}
+            <div
+              className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
+              style={{
+                background: 'linear-gradient(to right, #ef4444 0%, #fbbf24 35%, #d1d5db 50%, #86efac 65%, #22c55e 100%)',
+              }}
+            />
+            {/* Center pin at 50% — marks the "no change" position */}
+            <div
+              className="absolute w-0.5 h-3 rounded-full bg-slate-500 pointer-events-none"
+              style={{ left: '50%', transform: 'translateX(-50%)' }}
+            />
+            <input
+              type="range"
+              value={sliderPct}
+              min={SLIDER_MIN}
+              max={SLIDER_MAX}
+              step={0.1}
+              onChange={e => handleSliderChange(parseFloat(e.target.value))}
+              className="delta-slider"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -516,7 +546,14 @@ function MonthlyEditorPanel({
 
   const runProjection = useCallback((type: ProjType, endVal: number) => {
     if (months.length === 0) return;
-    const startVal = driver.defaultValue;
+    // Always start from the last known historical value so the projection
+    // correctly interpolates from current reality to the target, regardless
+    // of what the user has set as the global driver default.
+    const histMonths = Object.keys(historyData).sort();
+    const lastHistKey = histMonths[histMonths.length - 1];
+    const startVal = lastHistKey !== undefined && historyData[lastHistKey] !== undefined
+      ? historyData[lastHistKey]
+      : driver.defaultValue;
     const n = months.length;
 
     if (type === 'linear') {
@@ -562,7 +599,7 @@ function MonthlyEditorPanel({
       months.forEach((m, i) => onMonthChange(m, round(raw[i] * scale)));
     }
     setIsDirty(true);
-  }, [months, driver.defaultValue, historyData, round, onMonthChange]);
+  }, [months, driver.defaultValue, driver.step, historyData, round, onMonthChange]);
 
   const handleProjTypeChange = (type: ProjType) => {
     setProjType(type);
