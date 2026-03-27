@@ -5,6 +5,7 @@ import { runForecast, createDefaultDrivers, ForecastWarning } from '../engine/fo
 import { generateTargetPath } from '../utils/targetPaths';
 import { SIMULATOR_DRIVER_MAPPING } from '../data/metricDefinitions';
 import { addMonths, format } from 'date-fns';
+import { DRIVER_HISTORY } from '../data/driverHistory';
 
 interface AppState {
   // App
@@ -65,9 +66,12 @@ interface AppState {
   setForecastAsTarget: (targetPlanId: string) => void;
 }
 
-// Forecast starts the month AFTER the current month so it never overlaps history
-const defaultStart = format(addMonths(new Date(), 1), 'yyyy-MM');
-const defaultEnd   = format(addMonths(new Date(), 13), 'yyyy-MM'); // 12 months of forecast
+// Forecast starts the month AFTER the last historical data point (not after today's date)
+// This prevents overlap regardless of the user's system clock.
+const _allHistMonths = Object.keys(DRIVER_HISTORY['installs'] ?? {}).sort();
+const _lastHistMonth = _allHistMonths[_allHistMonths.length - 1] ?? format(new Date(), 'yyyy-MM');
+const defaultStart = format(addMonths(new Date(_lastHistMonth + '-02'), 1), 'yyyy-MM');
+const defaultEnd   = format(addMonths(new Date(defaultStart   + '-02'), 12), 'yyyy-MM');
 
 export const useAppStore = create<AppState>((set, get) => {
   const initialDrivers = createDefaultDrivers(mockBaseline);
