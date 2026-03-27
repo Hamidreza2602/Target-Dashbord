@@ -475,8 +475,6 @@ function MonthlyEditorPanel({
   const [histWindow, setHistWindow] = useState<HistWindow>('12');
   const [projType, setProjType] = useState<ProjType>('linear');
   const [targetValue, setTargetValue] = useState<number>(driver.defaultValue);
-  const [isDirty, setIsDirty] = useState(false);
-  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
@@ -492,14 +490,13 @@ function MonthlyEditorPanel({
     : driver.defaultValue;
 
   // Target gauge: % change of targetValue vs historical baseline
-  // Moving the gauge re-runs the projection → chart updates immediately
+  // Symmetric ±100 range so 0% is always visually at the exact center (50%)
   const GAUGE_MIN = -100;
-  const GAUGE_MAX = 200;  // allow up to 3× baseline
+  const GAUGE_MAX = 100;
+  const centerTrackPct = 50; // always at 50% since range is symmetric
   const tgtPct = gaugeOriginal !== 0
     ? ((targetValue - gaugeOriginal) / Math.abs(gaugeOriginal)) * 100
     : 0;
-  // Map tgtPct to 0-100 track position (center = 0%, i.e., track pos = GAUGE_MIN/(GAUGE_MIN-GAUGE_MAX)*100)
-  const centerTrackPct = (-GAUGE_MIN / (GAUGE_MAX - GAUGE_MIN)) * 100; // ~33.3% for -100..200
   const tgtTrackPct = Math.max(0, Math.min(100,
     ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
   ));
@@ -534,17 +531,23 @@ function MonthlyEditorPanel({
       ? allHistMonths
       : allHistMonths.slice(-(parseInt(histWindow)));
 
+    const lastHistMonth = windowedHist[windowedHist.length - 1];
+
+    // Historical points; the LAST one also gets a forecast value so the
+    // dashed forecast line starts right at the historical end — no gap.
     const histPoints = windowedHist.map(m => ({
       month: formatMonthLabel(m),
+      monthKey: null as string | null,
       historical: historyData[m],
-      forecast: null as number | null,
+      forecast: m === lastHistMonth ? (historyData[m] ?? null) : null,
     }));
 
-    const lastHistMonth = windowedHist[windowedHist.length - 1];
-    const forecastPoints = months.map((m, i) => ({
+    // Forecast points start from the month AFTER the last historical month.
+    // No bridge needed here — the bridge is already in histPoints above.
+    const forecastPoints = months.map(m => ({
       month: formatMonthLabel(m),
       monthKey: m,
-      historical: i === 0 && lastHistMonth ? historyData[lastHistMonth] ?? null : null,
+      historical: null as number | null,
       forecast: effectiveMonthlyValues[m],
     }));
 
@@ -651,7 +654,6 @@ function MonthlyEditorPanel({
       const endOffset = endVal - raw[raw.length - 1];
       months.forEach((m, i) => onMonthChange(m, round(raw[i] + endOffset)));
     }
-    setIsDirty(true);
   }, [months, driver.defaultValue, driver.step, historyData, round, onMonthChange]);
 
   // Auto-run projection when the panel first opens (no overrides yet)
@@ -672,7 +674,6 @@ function MonthlyEditorPanel({
 
   const handleMonthChange = useCallback((month: string, val: number) => {
     onMonthChange(month, val);
-    setIsDirty(true);
   }, [onMonthChange]);
 
   // Keep drag ref in sync with latest handleMonthChange
@@ -722,35 +723,12 @@ function MonthlyEditorPanel({
     );
   }, [chartYDomain]);
 
-  const handleSave = () => setIsDirty(false);
-
-  const handleClose = () => {
-    if (isDirty) setShowCloseConfirm(true);
-    else onClose();
-  };
-
-  const resetAll = () => { months.forEach(m => onResetMonth(m)); setIsDirty(true); };
+  const resetAll = () => months.forEach(m => onResetMonth(m));
   const refLineLabel = months[0] ? formatMonthLabel(months[0]) : '';
 
   return (
     <div className="border-t-2 border-blue-400 bg-gradient-to-b from-blue-50/60 to-white px-6 py-4">
-      {showCloseConfirm && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-80">
-            <p className="text-sm font-semibold mb-2">Unsaved changes</p>
-            <p className="text-sm text-gray-500 mb-4">You have unsaved changes. Close without saving?</p>
-            <div className="flex gap-2 justify-end">
-              <button className="btn-secondary text-xs" onClick={() => setShowCloseConfirm(false)}>Cancel</button>
-              <button className="text-xs px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
-                onClick={() => { setShowCloseConfirm(false); onClose(); }}>Close without saving</button>
-              <button className="btn-primary text-xs"
-                onClick={() => { handleSave(); setShowCloseConfirm(false); onClose(); }}>Save & Close</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
+      {/* Header — no Save button, all changes auto-save */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-4">
           <h4 className="text-sm font-semibold text-gray-900">{driver.label}</h4>
@@ -767,16 +745,12 @@ function MonthlyEditorPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handleSave} disabled={!isDirty}
-            className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded border transition-colors ${isDirty ? 'border-emerald-400 text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'border-gray-200 text-gray-400 cursor-default'}`}>
-            <Save size={11} /> {isDirty ? 'Save' : 'Saved'}
-          </button>
           {hasOverrides && (
             <button onClick={resetAll} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700">
               <RotateCcw size={11} /> Reset all
             </button>
           )}
-          <button onClick={handleClose} className="text-xs text-gray-500 hover:text-gray-700 font-medium">Close</button>
+          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-700 font-medium">Close</button>
         </div>
       </div>
 
@@ -915,7 +889,7 @@ function MonthlyEditorPanel({
                       step={isInteger ? 1 : driver.step}
                     />
                     {hasOverride && (
-                      <button onClick={() => { onResetMonth(m); setIsDirty(true); }}
+                      <button onClick={() => { onResetMonth(m); }}
                         className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
                     )}
                   </div>
