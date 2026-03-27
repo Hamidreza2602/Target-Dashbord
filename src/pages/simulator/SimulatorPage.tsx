@@ -26,7 +26,8 @@ function formatMonthLabel(yyyymm: string): string {
 export default function SimulatorPage() {
   const {
     forecastMonths, forecastWarnings, drivers, forecastStartDate, forecastEndDate,
-    updateDriver, updateDriverMonth, resetDriverMonth, setForecastDates, runSimulation,
+    updateDriver, updateDriverMonth, batchUpdateDriverMonths, resetAllDrivers,
+    resetDriverMonth, setForecastDates, runSimulation,
     scenarios, activeScenarioId, saveScenario, duplicateScenario, createTargetFromScenario,
   } = useAppStore();
 
@@ -82,8 +83,8 @@ export default function SimulatorPage() {
           <p className="text-sm text-gray-500 mt-1">Model future outcomes by adjusting business drivers</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => runSimulation()} className="btn-secondary flex items-center gap-1.5">
-            <RefreshCw size={15} /> Refresh
+          <button onClick={() => resetAllDrivers()} className="btn-secondary flex items-center gap-1.5">
+            <RefreshCw size={15} /> Reset
           </button>
           <button onClick={() => setShowSaveModal(true)} className="btn-secondary flex items-center gap-1.5">
             <Save size={15} /> Save
@@ -137,10 +138,10 @@ export default function SimulatorPage() {
               {((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100) >= 0 ? '+' : ''}
               {((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100).toFixed(1)}% over period
             </p>
-            <div className="mt-2 pt-2 border-t border-gray-100 flex gap-2 text-[10px] text-gray-500 flex-wrap">
-              <span>Rec <span className="font-semibold text-gray-700">{formatCurrency(lastMonth.mrrRecurring)}</span></span>
-              <span>Pre <span className="font-semibold text-emerald-600">{formatCurrency(lastMonth.mrrPreorder)}</span></span>
-              <span>SMS <span className="font-semibold text-purple-600">{formatCurrency(lastMonth.mrrSMS)}</span></span>
+            <div className="mt-2 pt-2 border-t border-gray-100 flex flex-col gap-0.5 text-[10px] text-gray-500">
+              <div className="flex justify-between"><span>Recurring</span><span className="font-semibold text-gray-700">{formatCurrency(lastMonth.mrrRecurring)}</span></div>
+              <div className="flex justify-between"><span>Preorder</span><span className="font-semibold text-emerald-600">{formatCurrency(lastMonth.mrrPreorder)}</span></div>
+              <div className="flex justify-between"><span>SMS</span><span className="font-semibold text-purple-600">{formatCurrency(lastMonth.mrrSMS)}</span></div>
             </div>
           </div>
           <SummaryCard label="End Customers" value={formatNumber(lastMonth.customers)} change={((lastMonth.customers - firstMonth.customers) / Math.max(1, firstMonth.customers) * 100).toFixed(1)} />
@@ -249,6 +250,7 @@ export default function SimulatorPage() {
               driver={drivers[showMonthlyEditor]}
               months={forecastMonths.map(m => m.month)}
               onMonthChange={(month, val) => updateDriverMonth(showMonthlyEditor, month, val)}
+              onBatchMonthChange={vals => batchUpdateDriverMonths(showMonthlyEditor, vals)}
               onResetMonth={(month) => resetDriverMonth(showMonthlyEditor, month)}
               onClose={() => setShowMonthlyEditor(null)}
               onGlobalChange={val => updateDriver(showMonthlyEditor, val)}
@@ -460,11 +462,12 @@ function CompactDriverRow({
 }
 
 function MonthlyEditorPanel({
-  driver, months, onMonthChange, onResetMonth, onClose, onGlobalChange,
+  driver, months, onMonthChange, onBatchMonthChange, onResetMonth, onClose, onGlobalChange,
 }: {
   driver: DriverConfig;
   months: string[];
   onMonthChange: (month: string, val: number) => void;
+  onBatchMonthChange: (vals: Record<string, number>) => void;
   onResetMonth: (month: string) => void;
   onClose: () => void;
   onGlobalChange: (val: number) => void;
@@ -602,9 +605,8 @@ function MonthlyEditorPanel({
 
   const runProjection = useCallback((type: ProjType, endVal: number) => {
     if (months.length === 0) return;
-    // Always start from the last known historical value so the projection
-    // correctly interpolates from current reality to the target, regardless
-    // of what the user has set as the global driver default.
+    // Start from last known historical value (not driver.defaultValue) so
+    // the projection interpolates from current reality → target end value.
     const histMonths = Object.keys(historyData).sort();
     const lastHistKey = histMonths[histMonths.length - 1];
     const startVal = lastHistKey !== undefined && historyData[lastHistKey] !== undefined
@@ -612,55 +614,55 @@ function MonthlyEditorPanel({
       : driver.defaultValue;
     const n = months.length;
 
+    // Compute all values first, THEN batch-write in a single store operation
+    // (prevents intermediate renders showing driver.defaultValue for un-written months)
+    let newValues: Record<string, number> = {};
+
     if (type === 'linear') {
       months.forEach((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
-        onMonthChange(m, round(startVal + (endVal - startVal) * t));
+        newValues[m] = round(startVal + (endVal - startVal) * t);
       });
     } else if (type === 'curve') {
-      // Ease-in (J-curve): starts slow, accelerates continuously, peak IS the endpoint
       months.forEach((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
-        const ease = t * t;   // quadratic ease-in — always accelerating to end
-        onMonthChange(m, round(startVal + (endVal - startVal) * ease));
+        newValues[m] = round(startVal + (endVal - startVal) * t * t);
       });
     } else {
-      // Trend Learning: linear slope + ADDITIVE seasonal fluctuations
-      // (seasonal deviation added to base, not multiplied — preserves the linear slope)
+      // Trend Learning: linear slope + additive seasonal fluctuations
       const allHistVals = Object.values(historyData);
       if (allHistVals.length === 0) {
         months.forEach((m, i) => {
           const t = n > 1 ? i / (n - 1) : 1;
-          onMonthChange(m, round(startVal + (endVal - startVal) * t));
+          newValues[m] = round(startVal + (endVal - startVal) * t);
         });
-        return;
+      } else {
+        const overallAvg = allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length;
+        const byMoY: Record<number, number[]> = {};
+        Object.entries(historyData).forEach(([month, val]) => {
+          const moy = parseInt(month.split('-')[1]) - 1;
+          if (!byMoY[moy]) byMoY[moy] = [];
+          byMoY[moy].push(val);
+        });
+        const seasonalAdj: Record<number, number> = {};
+        for (let i = 0; i < 12; i++) {
+          seasonalAdj[i] = byMoY[i]
+            ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg
+            : 0;
+        }
+        const raw = months.map((m, i) => {
+          const t = n > 1 ? i / (n - 1) : 1;
+          const base = startVal + (endVal - startVal) * t;
+          const moy = parseInt(m.split('-')[1]) - 1;
+          return base + (seasonalAdj[moy] ?? 0);
+        });
+        const endOffset = endVal - raw[raw.length - 1];
+        months.forEach((m, i) => { newValues[m] = round(raw[i] + endOffset); });
       }
-      const overallAvg = allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length;
-      const byMoY: Record<number, number[]> = {};
-      Object.entries(historyData).forEach(([month, val]) => {
-        const moy = parseInt(month.split('-')[1]) - 1;
-        if (!byMoY[moy]) byMoY[moy] = [];
-        byMoY[moy].push(val);  // absolute values for additive model
-      });
-      // Seasonal adjustment = mean of that calendar month minus overall mean
-      const seasonalAdj: Record<number, number> = {};
-      for (let i = 0; i < 12; i++) {
-        seasonalAdj[i] = byMoY[i]
-          ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg
-          : 0;
-      }
-      // Build raw: linear base + seasonal bump
-      const raw = months.map((m, i) => {
-        const t = n > 1 ? i / (n - 1) : 1;
-        const base = startVal + (endVal - startVal) * t;
-        const moy = parseInt(m.split('-')[1]) - 1;
-        return base + (seasonalAdj[moy] ?? 0);
-      });
-      // Shift entire series by a constant so last month hits exactly endVal
-      const endOffset = endVal - raw[raw.length - 1];
-      months.forEach((m, i) => onMonthChange(m, round(raw[i] + endOffset)));
     }
-  }, [months, driver.defaultValue, driver.step, historyData, round, onMonthChange]);
+    // Single atomic write → one simulation run → no flickering intermediate state
+    onBatchMonthChange(newValues);
+  }, [months, driver.defaultValue, driver.step, historyData, round, onBatchMonthChange]);
 
   // Auto-run projection when the panel first opens (no overrides yet)
   // so months immediately ramp from the last historical value to the target,

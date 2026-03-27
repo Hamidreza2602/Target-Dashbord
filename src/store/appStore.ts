@@ -35,6 +35,8 @@ interface AppState {
   setActiveScenario: (id: string) => void;
   updateDriver: (key: string, value: number) => void;
   updateDriverMonth: (key: string, month: string, value: number) => void;
+  batchUpdateDriverMonths: (key: string, monthValues: Record<string, number>) => void;
+  resetAllDrivers: () => void;
   resetDriverMonth: (key: string, month: string) => void;
   runSimulation: () => void;
   setForecastDates: (start: string, end: string) => void;
@@ -115,6 +117,28 @@ export const useAppStore = create<AppState>((set, get) => {
           [key]: { ...driver, monthlyValues: { ...driver.monthlyValues, [month]: value } },
         },
       });
+      get().runSimulation();
+    },
+
+    // Set ALL monthly overrides for a driver at once → runs simulation only once
+    batchUpdateDriverMonths: (key, monthValues) => {
+      const { drivers } = get();
+      const driver = drivers[key];
+      set({
+        drivers: {
+          ...drivers,
+          [key]: { ...driver, monthlyValues: { ...driver.monthlyValues, ...monthValues } },
+        },
+      });
+      get().runSimulation();
+    },
+
+    // Reset ALL drivers to their baseline defaults, clear all monthly overrides
+    resetAllDrivers: () => {
+      const initialDrivers = createDefaultDrivers(
+        get().baselines.find(b => b.id === get().activeBaselineId)!
+      );
+      set({ drivers: initialDrivers });
       get().runSimulation();
     },
 
