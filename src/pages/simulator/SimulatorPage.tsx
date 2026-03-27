@@ -383,6 +383,17 @@ function CompactDriverRow({
     onGlobalChange(clamped);
   };
 
+  // Track gradient: gray by default; color only the filled segment from center → thumb
+  // thumbTrackPct maps sliderPct (-100..+100) to track position (0..100%)
+  const thumbTrackPct = (sliderPct + 100) / 2; // center = 50%
+  const trackBg = Math.abs(pctChange) < 0.05
+    ? '#d1d5db'
+    : pctChange > 0
+      // positive: green fill from center(50%) to thumb
+      ? `linear-gradient(to right, #d1d5db 0%, #d1d5db 50%, #4ade80 50%, #16a34a ${thumbTrackPct}%, #d1d5db ${thumbTrackPct}%, #d1d5db 100%)`
+      // negative: red fill from thumb to center(50%)
+      : `linear-gradient(to right, #d1d5db 0%, #d1d5db ${thumbTrackPct}%, #dc2626 ${thumbTrackPct}%, #fca5a5 50%, #d1d5db 50%, #d1d5db 100%)`;
+
   return (
     <div className={`py-2 px-3 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
       <div className="flex items-center justify-between mb-1">
@@ -410,7 +421,7 @@ function CompactDriverRow({
         />
         {driver.unit === 'percent' && <span className="text-gray-400 text-[10px]">%</span>}
 
-        {/* % change label + gradient delta slider stacked */}
+        {/* % change label + delta slider stacked */}
         <div className="flex-1 flex flex-col">
           {/* % badge — centered above the track */}
           <div className="flex justify-center mb-0.5">
@@ -421,16 +432,14 @@ function CompactDriverRow({
 
           {/* Track + thumb */}
           <div className="relative h-4 flex items-center">
-            {/* Gradient track (red ← 0 → green, neutral gray at exact center) */}
+            {/* Dynamic track: gray when at 0, colored fill from center to thumb */}
             <div
               className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
-              style={{
-                background: 'linear-gradient(to right, #ef4444 0%, #fbbf24 35%, #d1d5db 50%, #86efac 65%, #22c55e 100%)',
-              }}
+              style={{ background: trackBg }}
             />
             {/* Center pin at 50% — marks the "no change" position */}
             <div
-              className="absolute w-0.5 h-3 rounded-full bg-slate-500 pointer-events-none"
+              className="absolute w-0.5 h-3 rounded-full bg-slate-400 pointer-events-none"
               style={{ left: '50%', transform: 'translateX(-50%)' }}
             />
             <input
@@ -600,6 +609,17 @@ function MonthlyEditorPanel({
     }
     setIsDirty(true);
   }, [months, driver.defaultValue, driver.step, historyData, round, onMonthChange]);
+
+  // Auto-run projection when the panel first opens (no overrides yet)
+  // so months immediately ramp from the last historical value to the target,
+  // instead of staying flat at driver.defaultValue.
+  useEffect(() => {
+    if (Object.keys(driver.monthlyValues).length === 0) {
+      runProjection('linear', targetValue);
+    }
+    // intentionally runs once on mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleProjTypeChange = (type: ProjType) => {
     setProjType(type);
