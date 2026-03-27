@@ -30,18 +30,17 @@ function drv(drivers: Record<string, DriverConfig>, key: string, month: string, 
 /**
  * ## Forecast Engine v3 — Old/New Segmented Model with Old-Free Conversion
  *
- * ### FreeUser[m] (5 terms):
- *   term1 = freeUser[m-1] × (1 − churnFreeUserOld)                                                        ← old free surviving
+ * ### FreeUser[m] (4 terms):
+ *   term1 = freeUser[m-1] × (1 − churnFreeUserOld) × (1 − convFreeToPaidOld)                              ← old free surviving minus those who converted
  *   term2 = install[m] × (1 − freeUserChurnNew) × (1 − convFreeToPaidNew)                                 ← new installs staying free
  *   term3 = install[m] × (1 − freeUserChurnNew) × convFreeToPaidNew × (1 − paidUserChurnNew) × backToFreeNew  ← new converts back to free
- *   term4 = paidUser[m-1] × (1 − paidUserChurnOld) × backToFreeOld                                        ← old paid back to free
- *   term5 = freeUser[m-1] × (1 − churnFreeUserOld) × convFreeToPaidOld × ½ × (1 − paidUserChurnNew) × ½ × backToFreeNew  ← old free mid-month converts back to free
- *   FreeUser[m] = term1 + term2 + term3 + term4 + term5
+ *   term4 = freeUser[m-1] × (1 − churnFreeUserOld) × convFreeToPaidOld × ½ × (1 − paidUserChurnNew) × ½ × backToFreeNew  ← old free mid-month converts back to free
+ *   FreeUser[m] = term1 + term2 + term3 + term4
  *
  * ### PaidUser[m] (3 terms):
- *   term1 = paidUser[m-1] × (1 − paidUserChurnOld)                                                        ← old paid surviving
- *   term2 = install[m] × (1 − freeUserChurnNew) × convFreeToPaidNew                                       ← new installs converted
- *   term3 = freeUser[m-1] × (1 − churnFreeUserOld) × convFreeToPaidOld × ½ × (1 − paidUserChurnNew)      ← old free mid-month converts
+ *   term1 = paidUser[m-1] × (1 − paidUserChurnOld)                                                                                    ← old paid surviving
+ *   term2 = install[m] × (1 − freeUserChurnNew) × convFreeToPaidNew × (1 − paidUserChurnNew) × (1 − backToFreeNew)               ← new installs converted, survived, stayed paid
+ *   term3 = freeUser[m-1] × (1 − churnFreeUserOld) × convFreeToPaidOld × ½ × (1 − paidUserChurnNew) × (1 − backToFreeNew)       ← old free mid-month converts, survived, stayed paid
  *   PaidUser[m] = term1 + term2 + term3
  *
  * ### ARPURecurringOld (derived, not a driver):
@@ -145,19 +144,18 @@ export function runForecast(input: ForecastInput): ForecastResult {
     const oldFreeSurviving      = prevFreeUsers * (1 - freeChurnRateOld);
     const oldFreeConvBase       = oldFreeSurviving * convRateOld * 0.5; // mid-month conversion, ½ factor
 
-    // --- FreeUser[m] — 5 terms ---
-    const term1Free = oldFreeSurviving;                                                               // old free surviving (incl. those who haven't converted)
-    const term2Free = survivingNewInstalls * (1 - userConvRateNew);                                   // new installs staying free
-    const term3Free = newConvertedToPaid * (1 - paidChurnRateNew) * backToFreeRateNew;               // new converts → paid → back to free
-    const term4Free = prevCustomers * (1 - paidChurnRateOld) * backToFreeRateOld;                    // old paid → back to free
-    const term5Free = oldFreeConvBase * (1 - paidChurnRateNew) * 0.5 * backToFreeRateNew;           // old free mid-month converts → back to free
+    // --- FreeUser[m] — 4 terms ---
+    const term1Free = oldFreeSurviving * (1 - convRateOld);                                          // ① old free surviving minus those who converted
+    const term2Free = survivingNewInstalls * (1 - userConvRateNew);                                  // ② new installs staying free
+    const term3Free = newConvertedToPaid * (1 - paidChurnRateNew) * backToFreeRateNew;              // ③ new converts → paid → back to free
+    const term4Free = oldFreeConvBase * (1 - paidChurnRateNew) * 0.5 * backToFreeRateNew;          // ④ old free mid-month converts → back to free
 
-    freeUsers = Math.max(0, Math.round(term1Free + term2Free + term3Free + term4Free + term5Free));
+    freeUsers = Math.max(0, Math.round(term1Free + term2Free + term3Free + term4Free));
 
     // --- PaidUser[m] — 3 terms ---
-    const term1Paid = prevCustomers * (1 - paidChurnRateOld);                                        // old paid surviving
-    const term2Paid = newConvertedToPaid;                                                             // new installs → paid
-    const term3Paid = oldFreeConvBase * (1 - paidChurnRateNew);                                      // old free mid-month converts to paid, surviving paid churn
+    const term1Paid = prevCustomers * (1 - paidChurnRateOld);                                                                  // ① old paid surviving
+    const term2Paid = newConvertedToPaid * (1 - paidChurnRateNew) * (1 - backToFreeRateNew);                                   // ② new installs → paid → survived → stayed paid
+    const term3Paid = oldFreeConvBase * (1 - paidChurnRateNew) * (1 - backToFreeRateNew);                                      // ③ old free mid-month converts → survived paid churn → stayed paid
 
     customers = Math.max(0, Math.round(term1Paid + term2Paid + term3Paid));
 
@@ -174,8 +172,8 @@ export function runForecast(input: ForecastInput): ForecastResult {
     // Existing customers (old paid + old-free mid-month converts) earn at ARPURecurringOld
     // New customers from installs earn at ARPURecurringNew
     const oldPaidCount      = term1Paid;                                                              // = prevCustomers * (1 - paidChurnRateOld)
-    const oldFreeConvCount  = term3Paid;                                                              // = oldFreeConvBase * (1 - paidChurnRateNew)
-    const newInstallCount   = newConvertedToPaid * (1 - paidChurnRateNew);                           // installs that converted & survived paid churn
+    const oldFreeConvCount  = term3Paid;                                                              // = oldFreeConvBase * (1 - paidChurnRateNew) * (1 - backToFreeRateNew)
+    const newInstallCount   = term2Paid;                                                              // = newConvertedToPaid * (1 - paidChurnRateNew) * (1 - backToFreeRateNew)
     const mrrRecurring      = arpuRecurringOld * (oldPaidCount + oldFreeConvCount)
                             + newInstallCount * arpuRecurringNew;
 
@@ -227,7 +225,7 @@ export function runForecast(input: ForecastInput): ForecastResult {
       freeUsers,
       customers,
 
-      newFreeUsers:  Math.round(term2Free + term3Free + term5Free),
+      newFreeUsers:  Math.round(term2Free + term3Free + term4Free),
       oldFreeUsers:  Math.round(term1Free),
       newCustomers:  newCustomersCount,
       oldCustomers:  Math.round(term1Paid),
@@ -289,7 +287,7 @@ export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string,
     baselineKey: string; fallback: number; min?: number; max?: number; step?: number;
   }> = [
     // === Growth ===
-    { key: 'installs',            label: 'Installations',               category: 'growth_adoption', unit: 'count',   baselineKey: 'installs',          fallback: 1689, min: 0, max: 10000, step: 10 },
+    { key: 'installs',            label: 'Installations',               category: 'growth_adoption', unit: 'count',   baselineKey: '_',                 fallback: 1689, min: 0, max: 10000, step: 10 },
 
     // === Conversion ===
     { key: 'user_conv_rate_new',  label: 'Conv. Rate New Free→Paid',    category: 'conversion',      unit: 'percent', baselineKey: '_',                 fallback: 13.9,  min: 0, max: 100,  step: 0.1 },
@@ -308,7 +306,7 @@ export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string,
     { key: 'back_to_free_rate_new', label: 'Back to Free Rate (New)',   category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 1.1,   min: 0, max: 50,   step: 0.1 },
 
     // === Monetization: Recurring (new customers — old is derived from prevMRR/prevCustomers) ===
-    { key: 'arpu_recurring_new',    label: 'ARPU Recurring (New Cust)', category: 'monetization',    unit: 'currency', baselineKey: 'arpu_recurring',   fallback: 41,    min: 0, max: 500,  step: 0.5 },
+    { key: 'arpu_recurring_new',    label: 'ARPU Recurring (New Cust)', category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 41,    min: 0, max: 500,  step: 0.5 },
 
     // === Monetization: Preorder — ARPU = Preorder Rev / (preorderPct × customers) = 60349 / (11.3% × 7980) ≈ $67 ===
     { key: 'preorder_customers_pct', label: 'Preorder Customers %',     category: 'monetization',    unit: 'percent',  baselineKey: '_',                fallback: 11.3,  min: 0, max: 100,  step: 0.5 },

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { inputDrivers } from '../../data/metricDefinitions';
 import { formatCurrency, formatNumber, formatPercent } from '../../utils/format';
@@ -350,7 +350,19 @@ function CompactDriverRow({
   isMonthlyOpen: boolean;
   onToggleMonthly: () => void;
 }) {
+  const [originalValue] = useState(driver.defaultValue);
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
+
+  const min = driver.min ?? 0;
+  const max = driver.max ?? 100;
+  const range = max - min;
+  const centerPct = range > 0 ? Math.max(0, Math.min(100, ((originalValue - min) / range) * 100)) : 50;
+  const currentVal = driver.defaultValue;
+  const pctChange = originalValue !== 0
+    ? ((currentVal - originalValue) / Math.abs(originalValue)) * 100
+    : 0;
+  const pctLabel = pctChange === 0 ? '—' : `${pctChange > 0 ? '+' : ''}${pctChange.toFixed(1)}%`;
+  const pctColor = pctChange > 0.05 ? 'text-emerald-600' : pctChange < -0.05 ? 'text-red-500' : 'text-gray-400';
 
   return (
     <div className={`py-2 px-3 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
@@ -359,9 +371,12 @@ function CompactDriverRow({
           <span className="text-[11px] font-medium text-gray-700">{driver.label}</span>
           {hasOverrides && <span className="text-[9px] ml-1 text-blue-500 font-bold">CUSTOM</span>}
         </div>
-        <button onClick={onToggleMonthly} className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
-          {isMonthlyOpen ? 'Close' : 'Monthly'}
-        </button>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-semibold tabular-nums ${pctColor}`}>{pctLabel}</span>
+          <button onClick={onToggleMonthly} className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
+            {isMonthlyOpen ? 'Close' : 'Monthly'}
+          </button>
+        </div>
       </div>
       <div className="flex items-center gap-1.5">
         {driver.unit === 'currency' && <span className="text-gray-400 text-[10px]">$</span>}
@@ -375,15 +390,30 @@ function CompactDriverRow({
           max={driver.max}
         />
         {driver.unit === 'percent' && <span className="text-gray-400 text-[10px]">%</span>}
-        <input
-          type="range"
-          value={driver.defaultValue}
-          onChange={e => onGlobalChange(parseFloat(e.target.value))}
-          className="flex-1 h-1 accent-blue-500"
-          step={driver.step}
-          min={driver.min}
-          max={driver.max}
-        />
+        {/* Gradient delta slider */}
+        <div className="relative flex-1 h-4 flex items-center">
+          {/* Colour track */}
+          <div
+            className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
+            style={{
+              background: `linear-gradient(to right, #ef4444 0%, #fbbf24 ${centerPct * 0.5}%, #fbbf24 ${centerPct}%, #86efac ${centerPct + (100 - centerPct) * 0.5}%, #22c55e 100%)`,
+            }}
+          />
+          {/* Center marker (original value position) */}
+          <div
+            className="absolute w-px h-3 bg-slate-600 pointer-events-none"
+            style={{ left: `${centerPct}%`, transform: 'translateX(-50%)' }}
+          />
+          <input
+            type="range"
+            value={driver.defaultValue}
+            onChange={e => onGlobalChange(parseFloat(e.target.value))}
+            className="delta-slider"
+            step={driver.step}
+            min={driver.min}
+            max={driver.max}
+          />
+        </div>
       </div>
     </div>
   );
@@ -398,12 +428,21 @@ function MonthlyEditorPanel({
   onResetMonth: (month: string) => void;
   onClose: () => void;
 }) {
-  const [histWindow, setHistWindow] = useState<6 | 12 | 'all'>(12);
+  type HistWindow = '6' | '12' | 'all';
+  type ProjType = 'linear' | 'curve' | 'seasonal';
+
+  const [histWindow, setHistWindow] = useState<HistWindow>('12');
+  const [projType, setProjType] = useState<ProjType>('linear');
+  const [targetValue, setTargetValue] = useState<number>(driver.defaultValue);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
   const historyData = DRIVER_HISTORY[driver.key] ?? {};
+  const hasHistory = Object.keys(historyData).length > 0;
+  const isInteger = (driver.step ?? 0.01) >= 1;
 
-  // Effective forecast values (monthly overrides or defaultValue)
   const effectiveMonthlyValues = useMemo(() => {
     const result: Record<string, number> = {};
     months.forEach(m => {
@@ -412,25 +451,22 @@ function MonthlyEditorPanel({
     return result;
   }, [driver.defaultValue, driver.monthlyValues, months]);
 
-  // Build chart data: historical (solid) + forecast (dashed)
   const chartData = useMemo(() => {
     const allHistMonths = Object.keys(historyData).sort();
     const windowedHist = histWindow === 'all'
       ? allHistMonths
-      : allHistMonths.slice(-histWindow);
+      : allHistMonths.slice(-(parseInt(histWindow)));
 
     const histPoints = windowedHist.map(m => ({
-      month: m.substring(5), // MM display
-      fullMonth: m,
+      month: formatMonthLabel(m),
       historical: historyData[m],
       forecast: null as number | null,
     }));
 
-    // Junction: last hist month appears in both so the lines connect
     const lastHistMonth = windowedHist[windowedHist.length - 1];
     const forecastPoints = months.map((m, i) => ({
-      month: m.substring(5),
-      fullMonth: m,
+      month: formatMonthLabel(m),
+      monthKey: m,
       historical: i === 0 && lastHistMonth ? historyData[lastHistMonth] ?? null : null,
       forecast: effectiveMonthlyValues[m],
     }));
@@ -438,21 +474,173 @@ function MonthlyEditorPanel({
     return [...histPoints, ...forecastPoints];
   }, [historyData, histWindow, months, effectiveMonthlyValues]);
 
-  // Apply historical linear trend to all forecast months
-  const applyTrend = () => {
-    const trend = computeTrend(driver.key, months, 6);
-    months.forEach(m => {
-      const val = trend[m];
-      if (val !== undefined) onMonthChange(m, val);
-    });
+  const round = useCallback((v: number) => isInteger ? Math.round(v) : Math.round(v * 100) / 100, [isInteger]);
+
+  // ── Draggable chart dots ──────────────────────────────────────────────────
+  const dragRef = useRef<{
+    active: boolean;
+    monthKey: string;
+    startY: number;
+    startVal: number;
+    yMin: number;
+    yMax: number;
+  }>({ active: false, monthKey: '', startY: 0, startVal: 0, yMin: 0, yMax: 0 });
+
+  // Keep a stable ref to handleMonthChange so the effect doesn't need to re-register
+  const handleMonthChangeRef = useRef<(month: string, val: number) => void>(() => {});
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current.active) return;
+      const { monthKey, startY, startVal, yMin, yMax } = dragRef.current;
+      const chartPlotHeight = 132; // 160px height − ~28px margins
+      const valueRange = yMax - yMin || 1;
+      const deltaY = e.clientY - startY;
+      const deltaVal = -deltaY * (valueRange / chartPlotHeight);
+      const newVal = isInteger
+        ? Math.round(startVal + deltaVal)
+        : Math.round((startVal + deltaVal) * 100) / 100;
+      const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, newVal));
+      handleMonthChangeRef.current(monthKey, clamped);
+    };
+    const onMouseUp = () => { dragRef.current.active = false; };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const runProjection = useCallback((type: ProjType, endVal: number) => {
+    if (months.length === 0) return;
+    const startVal = driver.defaultValue;
+    const n = months.length;
+
+    if (type === 'linear') {
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        onMonthChange(m, round(startVal + (endVal - startVal) * t));
+      });
+    } else if (type === 'curve') {
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        const ease = t * t * (3 - 2 * t);
+        onMonthChange(m, round(startVal + (endVal - startVal) * ease));
+      });
+    } else {
+      // Trend Learning — uses ALL history for seasonal indices
+      const allHistVals = Object.values(historyData);
+      if (allHistVals.length === 0) {
+        months.forEach((m, i) => {
+          const t = n > 1 ? i / (n - 1) : 1;
+          onMonthChange(m, round(startVal + (endVal - startVal) * t));
+        });
+        return;
+      }
+      const overallAvg = allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length;
+      const byMoY: Record<number, number[]> = {};
+      Object.entries(historyData).forEach(([month, val]) => {
+        const moy = parseInt(month.split('-')[1]) - 1;
+        if (!byMoY[moy]) byMoY[moy] = [];
+        byMoY[moy].push(val / (overallAvg || 1));
+      });
+      const seasonalIdx: Record<number, number> = {};
+      for (let i = 0; i < 12; i++) {
+        seasonalIdx[i] = byMoY[i] ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length : 1.0;
+      }
+      const raw = months.map((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        const base = startVal + (endVal - startVal) * t;
+        const moy = parseInt(m.split('-')[1]) - 1;
+        return base * (seasonalIdx[moy] ?? 1.0);
+      });
+      const lastRaw = raw[raw.length - 1];
+      const scale = lastRaw !== 0 ? endVal / lastRaw : 1;
+      months.forEach((m, i) => onMonthChange(m, round(raw[i] * scale)));
+    }
+    setIsDirty(true);
+  }, [months, driver.defaultValue, historyData, round, onMonthChange]);
+
+  const handleProjTypeChange = (type: ProjType) => {
+    setProjType(type);
+    runProjection(type, targetValue);
   };
 
-  const resetAll = () => months.forEach(m => onResetMonth(m));
+  const handleMonthChange = useCallback((month: string, val: number) => {
+    onMonthChange(month, val);
+    setIsDirty(true);
+  }, [onMonthChange]);
 
-  const hasHistory = Object.keys(historyData).length > 0;
+  // Keep drag ref in sync with latest handleMonthChange
+  handleMonthChangeRef.current = handleMonthChange;
+
+  // Y-domain for drag pixel→value conversion
+  const chartYDomain = useMemo(() => {
+    const allVals = chartData.flatMap(d =>
+      [d.historical, d.forecast].filter((v): v is number => v !== null && v !== undefined)
+    );
+    if (allVals.length === 0) return { min: 0, max: 100 };
+    const mn = Math.min(...allVals);
+    const mx = Math.max(...allVals);
+    const pad = (mx - mn) * 0.1 || 10;
+    return { min: mn - pad, max: mx + pad };
+  }, [chartData]);
+
+  // Custom draggable dot for forecast line
+  const ForecastDot = useCallback((props: any) => {
+    const { cx, cy, payload } = props;
+    if (!payload?.monthKey || payload.forecast == null) return null;
+    return (
+      <circle
+        cx={cx} cy={cy} r={5}
+        fill="#8b5cf6" stroke="white" strokeWidth={2}
+        style={{ cursor: 'ns-resize', userSelect: 'none' }}
+        onMouseDown={(e: React.MouseEvent) => {
+          e.preventDefault();
+          dragRef.current = {
+            active: true,
+            monthKey: payload.monthKey,
+            startY: e.clientY,
+            startVal: payload.forecast,
+            yMin: chartYDomain.min,
+            yMax: chartYDomain.max,
+          };
+        }}
+      />
+    );
+  }, [chartYDomain]);
+
+  const handleSave = () => setIsDirty(false);
+
+  const handleClose = () => {
+    if (isDirty) setShowCloseConfirm(true);
+    else onClose();
+  };
+
+  const resetAll = () => { months.forEach(m => onResetMonth(m)); setIsDirty(true); };
+  const refLineLabel = months[0] ? formatMonthLabel(months[0]) : '';
 
   return (
     <div className="border-t-2 border-blue-400 bg-gradient-to-b from-blue-50/60 to-white px-6 py-4">
+      {showCloseConfirm && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-80">
+            <p className="text-sm font-semibold mb-2">Unsaved changes</p>
+            <p className="text-sm text-gray-500 mb-4">You have unsaved changes. Close without saving?</p>
+            <div className="flex gap-2 justify-end">
+              <button className="btn-secondary text-xs" onClick={() => setShowCloseConfirm(false)}>Cancel</button>
+              <button className="text-xs px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                onClick={() => { setShowCloseConfirm(false); onClose(); }}>Close without saving</button>
+              <button className="btn-primary text-xs"
+                onClick={() => { handleSave(); setShowCloseConfirm(false); onClose(); }}>Save & Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-4">
@@ -460,111 +648,87 @@ function MonthlyEditorPanel({
           {hasHistory && (
             <div className="flex items-center gap-1 text-[11px]">
               <span className="text-gray-400 mr-1">History:</span>
-              {([6, 12, 'all'] as const).map(w => (
-                <button
-                  key={w}
-                  onClick={() => setHistWindow(w)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-medium ${histWindow === w ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                >
+              {(['6', '12', 'all'] as HistWindow[]).map(w => (
+                <button key={w} onClick={() => setHistWindow(w)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium ${histWindow === w ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                   {w === 'all' ? 'All' : `${w}M`}
                 </button>
               ))}
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3">
-          {hasHistory && (
-            <button
-              onClick={applyTrend}
-              className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 font-medium border border-purple-200 px-2 py-0.5 rounded"
-            >
-              Apply Trend
-            </button>
-          )}
+        <div className="flex items-center gap-2">
+          <button onClick={handleSave} disabled={!isDirty}
+            className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded border transition-colors ${isDirty ? 'border-emerald-400 text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : 'border-gray-200 text-gray-400 cursor-default'}`}>
+            <Save size={11} /> {isDirty ? 'Save' : 'Saved'}
+          </button>
           {hasOverrides && (
             <button onClick={resetAll} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700">
               <RotateCcw size={11} /> Reset all
             </button>
           )}
-          <button onClick={onClose} className="text-xs text-gray-500 hover:text-gray-700 font-medium">Close</button>
+          <button onClick={handleClose} className="text-xs text-gray-500 hover:text-gray-700 font-medium">Close</button>
         </div>
       </div>
 
-      {/* Combined historical + forecast chart */}
+      {/* Chart */}
       {chartData.length > 0 && (
         <div className="mb-4 bg-white rounded-lg border border-gray-100 p-3">
           <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
             <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
             <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
+            <span className="ml-auto flex items-center gap-1 text-purple-400 italic">drag dots to adjust ↕</span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="month" tick={{ fontSize: 9 }} />
               <YAxis tick={{ fontSize: 9 }} width={40}
-                tickFormatter={v => unitLabel === '$' ? `$${v}` : `${v}${unitLabel}`}
-              />
-              <Tooltip
-                contentStyle={{ fontSize: 11 }}
-                formatter={(v: any) => [`${unitLabel === '$' ? '$' : ''}${v}${unitLabel !== '$' ? unitLabel : ''}`, '']}
-              />
-              {/* Junction divider */}
-              {months[0] && (
-                <ReferenceLine x={months[0].substring(5)} stroke="#cbd5e1" strokeDasharray="4 2" label={{ value: 'Now', position: 'top', fontSize: 9, fill: '#94a3b8' }} />
+                domain={[chartYDomain.min, chartYDomain.max]}
+                tickFormatter={v => unitLabel === '$' ? `$${v}` : `${v}${unitLabel}`} />
+              <Tooltip contentStyle={{ fontSize: 11 }}
+                formatter={(v: any) => [`${unitLabel === '$' ? '$' : ''}${v}${unitLabel !== '$' ? unitLabel : ''}`, '']} />
+              {refLineLabel && (
+                <ReferenceLine x={refLineLabel} stroke="#cbd5e1" strokeDasharray="4 2"
+                  label={{ value: 'Now', position: 'top', fontSize: 9, fill: '#94a3b8' }} />
               )}
-              {/* Historical — solid blue */}
-              <Line
-                type="monotone"
-                dataKey="historical"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                dot={{ r: 2, fill: '#3b82f6' }}
-                connectNulls={false}
-                isAnimationActive={false}
-                name="Historical"
-              />
-              {/* Forecast — dashed purple */}
-              <Line
-                type="monotone"
-                dataKey="forecast"
-                stroke="#8b5cf6"
-                strokeWidth={2}
-                strokeDasharray="5 4"
-                dot={{ r: 2, fill: '#8b5cf6' }}
-                connectNulls={false}
-                isAnimationActive={false}
-                name="Forecast"
-              />
+              <Line type="monotone" dataKey="historical" stroke="#3b82f6" strokeWidth={2}
+                dot={{ r: 2, fill: '#3b82f6' }} connectNulls={false} isAnimationActive={false} name="Historical" />
+              <Line type="monotone" dataKey="forecast" stroke="#8b5cf6" strokeWidth={2}
+                strokeDasharray="5 4" dot={<ForecastDot />} activeDot={{ r: 6, fill: '#7c3aed' }}
+                connectNulls={false} isAnimationActive={false} name="Forecast" />
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
 
-      {/* Monthly input grid — all forecast months */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(months.length, 12)}, minmax(0, 1fr))` }}>
-        {months.slice(0, 12).map(m => {
-          const hasOverride = driver.monthlyValues[m] !== undefined;
-          const val = effectiveMonthlyValues[m];
-          return (
-            <div key={m} className="flex flex-col items-center">
-              <span className="text-[10px] text-gray-500 mb-1 font-medium">{formatMonthLabel(m)}</span>
-              <input
-                type="number"
-                value={val}
-                onChange={e => onMonthChange(m, parseFloat(e.target.value) || 0)}
-                className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
-                step={driver.step}
-              />
-              {hasOverride && (
-                <button onClick={() => onResetMonth(m)} className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
-              )}
-            </div>
-          );
-        })}
+      {/* Projection Controls */}
+      <div className="flex items-center gap-3 mb-4 p-3 bg-white rounded-lg border border-gray-100">
+        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Target end value:</span>
+        {unitLabel === '$' && <span className="text-gray-400 text-xs">$</span>}
+        <input
+          type="number"
+          value={targetValue}
+          onChange={e => setTargetValue(parseFloat(e.target.value) || 0)}
+          onKeyDown={e => { if (e.key === 'Enter') { const v = parseFloat((e.target as HTMLInputElement).value) || 0; setTargetValue(v); runProjection(projType, v); } }}
+          className="input-field w-24 text-xs py-1 text-center"
+          step={driver.step}
+        />
+        {unitLabel === '%' && <span className="text-gray-400 text-xs">%</span>}
+        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap ml-2">Projection:</span>
+        <select value={projType} onChange={e => handleProjTypeChange(e.target.value as ProjType)}
+          className="input-field text-xs py-1">
+          <option value="linear">Linear</option>
+          <option value="curve">Curve</option>
+          <option value="seasonal">Trend Learning</option>
+        </select>
       </div>
-      {months.length > 12 && (
-        <div className="grid gap-2 mt-3" style={{ gridTemplateColumns: `repeat(${months.length - 12}, minmax(0, 1fr))` }}>
-          {months.slice(12).map(m => {
+
+      {/* Monthly input grid */}
+      {[months.slice(0, 12), months.slice(12)].filter(s => s.length > 0).map((slice, si) => (
+        <div key={si} className={`grid gap-2 ${si > 0 ? 'mt-3' : ''}`}
+          style={{ gridTemplateColumns: `repeat(${slice.length}, minmax(0, 1fr))` }}>
+          {slice.map(m => {
             const hasOverride = driver.monthlyValues[m] !== undefined;
             const val = effectiveMonthlyValues[m];
             return (
@@ -572,19 +736,22 @@ function MonthlyEditorPanel({
                 <span className="text-[10px] text-gray-500 mb-1 font-medium">{formatMonthLabel(m)}</span>
                 <input
                   type="number"
-                  value={val}
-                  onChange={e => onMonthChange(m, parseFloat(e.target.value) || 0)}
+                  value={isInteger ? Math.round(val) : val}
+                  onChange={e => handleMonthChange(m, isInteger
+                    ? Math.round(parseFloat(e.target.value) || 0)
+                    : (parseFloat(e.target.value) || 0))}
                   className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
-                  step={driver.step}
+                  step={isInteger ? 1 : driver.step}
                 />
                 {hasOverride && (
-                  <button onClick={() => onResetMonth(m)} className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
+                  <button onClick={() => { onResetMonth(m); setIsDirty(true); }}
+                    className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
                 )}
               </div>
             );
           })}
         </div>
-      )}
+      ))}
     </div>
   );
 }
