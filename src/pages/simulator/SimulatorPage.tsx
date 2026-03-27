@@ -251,6 +251,7 @@ export default function SimulatorPage() {
               onMonthChange={(month, val) => updateDriverMonth(showMonthlyEditor, month, val)}
               onResetMonth={(month) => resetDriverMonth(showMonthlyEditor, month)}
               onClose={() => setShowMonthlyEditor(null)}
+              onGlobalChange={val => updateDriver(showMonthlyEditor, val)}
             />
           </div>
         )}
@@ -374,11 +375,11 @@ function CompactDriverRow({
       ? 'text-red-500'
       : 'text-gray-400';
 
-  // Slider → actual value
+  // Slider → actual value (integers stay integers; rates rounded to 1 decimal)
   const handleSliderChange = (pct: number) => {
     const raw = originalValue * (1 + pct / 100);
     const step = driver.step ?? 1;
-    const snapped = step >= 1 ? Math.round(raw) : Math.round(raw / step) * step;
+    const snapped = step >= 1 ? Math.round(raw) : parseFloat(raw.toFixed(1));
     const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
     onGlobalChange(clamped);
   };
@@ -459,13 +460,14 @@ function CompactDriverRow({
 }
 
 function MonthlyEditorPanel({
-  driver, months, onMonthChange, onResetMonth, onClose,
+  driver, months, onMonthChange, onResetMonth, onClose, onGlobalChange,
 }: {
   driver: DriverConfig;
   months: string[];
   onMonthChange: (month: string, val: number) => void;
   onResetMonth: (month: string) => void;
   onClose: () => void;
+  onGlobalChange: (val: number) => void;
 }) {
   type HistWindow = '6' | '12' | 'all';
   type ProjType = 'linear' | 'curve' | 'seasonal';
@@ -481,6 +483,39 @@ function MonthlyEditorPanel({
   const historyData = DRIVER_HISTORY[driver.key] ?? {};
   const hasHistory = Object.keys(historyData).length > 0;
   const isInteger = (driver.step ?? 0.01) >= 1;
+
+  // Baseline for the gauge: last historical value (same as projection startVal)
+  const gaugeHistMonths = Object.keys(historyData).sort();
+  const gaugeLastHistKey = gaugeHistMonths[gaugeHistMonths.length - 1];
+  const gaugeOriginal = gaugeLastHistKey !== undefined && historyData[gaugeLastHistKey] !== undefined
+    ? historyData[gaugeLastHistKey]
+    : driver.defaultValue;
+
+  // Gauge derived values
+  const GAUGE_MIN = -100;
+  const GAUGE_MAX = 100;
+  const gaugePctChange = gaugeOriginal !== 0
+    ? ((driver.defaultValue - gaugeOriginal) / Math.abs(gaugeOriginal)) * 100
+    : 0;
+  const gaugeSliderPct = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gaugePctChange));
+  const gaugeThumbTrackPct = (gaugeSliderPct + 100) / 2;
+  const gaugePctLabel = Math.abs(gaugePctChange) < 0.05
+    ? '0%'
+    : `${gaugePctChange > 0 ? '+' : ''}${gaugePctChange.toFixed(1)}%`;
+  const gaugePctColor = gaugePctChange > 0.05
+    ? 'text-emerald-600' : gaugePctChange < -0.05 ? 'text-red-500' : 'text-gray-400';
+  const gaugeTrackBg = Math.abs(gaugePctChange) < 0.05
+    ? '#d1d5db'
+    : gaugePctChange > 0
+      ? `linear-gradient(to right,#d1d5db 0%,#d1d5db 50%,#4ade80 50%,#16a34a ${gaugeThumbTrackPct}%,#d1d5db ${gaugeThumbTrackPct}%,#d1d5db 100%)`
+      : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${gaugeThumbTrackPct}%,#dc2626 ${gaugeThumbTrackPct}%,#fca5a5 50%,#d1d5db 50%,#d1d5db 100%)`;
+  const handleGaugeSlider = (pct: number) => {
+    const raw = gaugeOriginal * (1 + pct / 100);
+    const step = driver.step ?? 1;
+    const snapped = step >= 1 ? Math.round(raw) : parseFloat(raw.toFixed(1));
+    const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
+    onGlobalChange(clamped);
+  };
 
   const effectiveMonthlyValues = useMemo(() => {
     const result: Record<string, number> = {};
@@ -571,13 +606,15 @@ function MonthlyEditorPanel({
         onMonthChange(m, round(startVal + (endVal - startVal) * t));
       });
     } else if (type === 'curve') {
+      // Ease-in (J-curve): starts slow, accelerates continuously, peak IS the endpoint
       months.forEach((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
-        const ease = t * t * (3 - 2 * t);
+        const ease = t * t;   // quadratic ease-in — always accelerating to end
         onMonthChange(m, round(startVal + (endVal - startVal) * ease));
       });
     } else {
-      // Trend Learning — uses ALL history for seasonal indices
+      // Trend Learning: linear slope + ADDITIVE seasonal fluctuations
+      // (seasonal deviation added to base, not multiplied — preserves the linear slope)
       const allHistVals = Object.values(historyData);
       if (allHistVals.length === 0) {
         months.forEach((m, i) => {
@@ -591,21 +628,25 @@ function MonthlyEditorPanel({
       Object.entries(historyData).forEach(([month, val]) => {
         const moy = parseInt(month.split('-')[1]) - 1;
         if (!byMoY[moy]) byMoY[moy] = [];
-        byMoY[moy].push(val / (overallAvg || 1));
+        byMoY[moy].push(val);  // absolute values for additive model
       });
-      const seasonalIdx: Record<number, number> = {};
+      // Seasonal adjustment = mean of that calendar month minus overall mean
+      const seasonalAdj: Record<number, number> = {};
       for (let i = 0; i < 12; i++) {
-        seasonalIdx[i] = byMoY[i] ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length : 1.0;
+        seasonalAdj[i] = byMoY[i]
+          ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg
+          : 0;
       }
+      // Build raw: linear base + seasonal bump
       const raw = months.map((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
         const base = startVal + (endVal - startVal) * t;
         const moy = parseInt(m.split('-')[1]) - 1;
-        return base * (seasonalIdx[moy] ?? 1.0);
+        return base + (seasonalAdj[moy] ?? 0);
       });
-      const lastRaw = raw[raw.length - 1];
-      const scale = lastRaw !== 0 ? endVal / lastRaw : 1;
-      months.forEach((m, i) => onMonthChange(m, round(raw[i] * scale)));
+      // Shift entire series by a constant so last month hits exactly endVal
+      const endOffset = endVal - raw[raw.length - 1];
+      months.forEach((m, i) => onMonthChange(m, round(raw[i] + endOffset)));
     }
     setIsDirty(true);
   }, [months, driver.defaultValue, driver.step, historyData, round, onMonthChange]);
@@ -646,27 +687,35 @@ function MonthlyEditorPanel({
     return { min: mn - pad, max: mx + pad };
   }, [chartData]);
 
-  // Custom draggable dot for forecast line
+  // Custom draggable dot for forecast line (render-function form for correct prop passing)
   const ForecastDot = useCallback((props: any) => {
     const { cx, cy, payload } = props;
+    if (cx == null || cy == null) return null;
     if (!payload?.monthKey || payload.forecast == null) return null;
     return (
-      <circle
-        cx={cx} cy={cy} r={5}
-        fill="#8b5cf6" stroke="white" strokeWidth={2}
-        style={{ cursor: 'ns-resize', userSelect: 'none' }}
-        onMouseDown={(e: React.MouseEvent) => {
-          e.preventDefault();
-          dragRef.current = {
-            active: true,
-            monthKey: payload.monthKey,
-            startY: e.clientY,
-            startVal: payload.forecast,
-            yMin: chartYDomain.min,
-            yMax: chartYDomain.max,
-          };
-        }}
-      />
+      <g key={payload.monthKey}>
+        {/* Larger invisible hit area */}
+        <circle
+          cx={cx} cy={cy} r={10}
+          fill="transparent"
+          style={{ cursor: 'ns-resize' }}
+          onMouseDown={(e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragRef.current = {
+              active: true,
+              monthKey: payload.monthKey,
+              startY: e.clientY,
+              startVal: payload.forecast,
+              yMin: chartYDomain.min,
+              yMax: chartYDomain.max,
+            };
+          }}
+        />
+        {/* Visual dot */}
+        <circle cx={cx} cy={cy} r={5} fill="#8b5cf6" stroke="white" strokeWidth={2}
+          style={{ pointerEvents: 'none' }} />
+      </g>
     );
   }, [chartYDomain]);
 
@@ -731,10 +780,46 @@ function MonthlyEditorPanel({
       {/* Chart */}
       {chartData.length > 0 && (
         <div className="mb-4 bg-white rounded-lg border border-gray-100 p-3">
+          {/* Gauge row — synced with CompactDriverRow number input above */}
+          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100">
+            <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap shrink-0">
+              {unitLabel === '$' ? '$' : ''}{driver.unit === 'percent' ? '' : ''}
+              {driver.label.split(' ')[0]}:
+            </span>
+            <input
+              type="number"
+              value={isInteger ? Math.round(driver.defaultValue) : parseFloat(driver.defaultValue.toFixed(1))}
+              onChange={e => onGlobalChange(parseFloat(e.target.value) || 0)}
+              className="input-field w-20 text-xs py-0.5 text-center"
+              step={driver.step}
+              min={driver.min}
+              max={driver.max}
+            />
+            {unitLabel && <span className="text-gray-400 text-[10px]">{unitLabel}</span>}
+            <div className="flex-1 flex flex-col">
+              <div className="flex justify-center mb-0.5">
+                <span className={`text-[9px] font-bold tabular-nums ${gaugePctColor}`}>{gaugePctLabel}</span>
+              </div>
+              <div className="relative h-3.5 flex items-center">
+                <div className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
+                  style={{ background: gaugeTrackBg }} />
+                <div className="absolute w-0.5 h-2.5 rounded-full bg-slate-400 pointer-events-none"
+                  style={{ left: '50%', transform: 'translateX(-50%)' }} />
+                <input
+                  type="range"
+                  value={gaugeSliderPct}
+                  min={GAUGE_MIN} max={GAUGE_MAX} step={0.1}
+                  onChange={e => handleGaugeSlider(parseFloat(e.target.value))}
+                  className="delta-slider"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
             <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
             <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
-            <span className="ml-auto flex items-center gap-1 text-purple-400 italic">drag dots to adjust ↕</span>
+            <span className="ml-auto flex items-center gap-1 text-purple-400 italic">drag dots ↕</span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -752,8 +837,8 @@ function MonthlyEditorPanel({
               <Line type="monotone" dataKey="historical" stroke="#3b82f6" strokeWidth={2}
                 dot={{ r: 2, fill: '#3b82f6' }} connectNulls={false} isAnimationActive={false} name="Historical" />
               <Line type="monotone" dataKey="forecast" stroke="#8b5cf6" strokeWidth={2}
-                strokeDasharray="5 4" dot={<ForecastDot />} activeDot={{ r: 6, fill: '#7c3aed' }}
-                connectNulls={false} isAnimationActive={false} name="Forecast" />
+                strokeDasharray="5 4" dot={(p: any) => <ForecastDot {...p} />}
+                activeDot={false} connectNulls={false} isAnimationActive={false} name="Forecast" />
             </LineChart>
           </ResponsiveContainer>
         </div>
