@@ -91,7 +91,7 @@ export interface ScenarioDriverValue {
 
 // ==================== Target ====================
 
-export type TargetPathType = 'linear' | 'front_loaded' | 'back_loaded';
+export type TargetPathType = 'linear' | 'front_loaded' | 'back_loaded' | 'immediate';
 
 export interface TargetPlan {
   id: string;

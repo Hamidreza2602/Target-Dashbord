@@ -4,7 +4,7 @@ import { TargetVersion, TargetMetric, Objective } from '../../../types';
 import { formatMetricValue } from '../../../utils/format';
 import { ChevronDown, ChevronRight, Zap } from 'lucide-react';
 
-const PATH_TYPE_LABELS = { linear: 'Linear', front_loaded: 'Front-loaded', back_loaded: 'Back-loaded' } as const;
+const PATH_TYPE_LABELS = { linear: 'Linear', front_loaded: 'Front-loaded', back_loaded: 'Back-loaded', immediate: 'Immediate' } as const;
 
 export default function TargetEditTab({ version }: { version: TargetVersion }) {
   const { regenerateTargetPath, updateMetricTargets } = useAppStore();

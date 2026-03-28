@@ -308,7 +308,7 @@ function mkMetric(
   id: string, objId: string, key: string, displayName: string,
   baseline: number, target: number, dir: Directionality,
   unit: MetricUnit, simKey: string | null = null,
-  pathType: TargetPathType = 'linear',
+  pathType: TargetPathType = 'front_loaded',
 ): TargetMetric {
   return {
     id, targetVersionId: VID, objectiveId: objId,

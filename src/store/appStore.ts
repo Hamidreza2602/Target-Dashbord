@@ -217,7 +217,7 @@ export const useAppStore = create<AppState>((set, get) => {
         const finalVal = (forecastMonths[numMonths - 1] as any)?.[key] || baseVal;
         const dir: Directionality = baseVal <= finalVal ? 'higher_better' : 'lower_better';
         const metricId = `tm-${versionId}-${i}`;
-        const pathValues = generateTargetPath(baseVal, finalVal, numMonths, 'linear');
+        const pathValues = generateTargetPath(baseVal, finalVal, numMonths, 'front_loaded');
 
         const periods: TargetMetricPeriod[] = pathValues.map((val, m) => ({
           id: `tp-${metricId}-${m}`,
@@ -237,7 +237,7 @@ export const useAppStore = create<AppState>((set, get) => {
           baselineValue: baseVal,
           finalTargetValue: finalVal,
           directionality: dir,
-          targetPathType: 'linear' as const,
+          targetPathType: 'front_loaded' as const,
           simulatorDriverKey: SIMULATOR_DRIVER_MAPPING[key] || null,
           unit: 'count' as const,
           includeInSummary: true,
@@ -572,7 +572,7 @@ export const useAppStore = create<AppState>((set, get) => {
           baselineValue: Math.round(baseline * 100) / 100,
           finalTargetValue: Math.round(target * 100) / 100,
           directionality: def.dir,
-          targetPathType: 'linear' as const,
+          targetPathType: 'front_loaded' as const,
           simulatorDriverKey: null,
           unit: def.unit,
           includeInSummary: true,

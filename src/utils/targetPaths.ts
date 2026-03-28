@@ -33,6 +33,10 @@ export function generateTargetPath(
         // Exponential: slow start, steep late
         factor = (Math.exp(t) - 1) / (Math.E - 1);
         break;
+      case 'immediate':
+        // Jump to target immediately and stay flat
+        factor = 1;
+        break;
       case 'linear':
       default:
         factor = t;
