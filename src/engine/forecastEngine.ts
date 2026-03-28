@@ -100,7 +100,7 @@ export function runForecast(input: ForecastInput): ForecastResult {
 
     // Churn rates
     const freeChurnRateOld  = drv(drivers, 'free_churn_rate_old', month, 4.8) / 100;
-    const freeChurnRateNew  = drv(drivers, 'free_churn_rate_new', month, 0.3) / 100;
+    const freeChurnRateNew  = drv(drivers, 'free_churn_rate_new', month, 30) / 100;
     const paidChurnRateOld  = drv(drivers, 'paid_churn_rate_old', month, 4.5) / 100;
     const paidChurnRateNew  = drv(drivers, 'paid_churn_rate_new', month, 12) / 100;
 
@@ -301,7 +301,7 @@ export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string,
 
     // === Free User Churn ===
     { key: 'free_churn_rate_old', label: 'Free Churn Rate (Old)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 4.8,   min: 0, max: 100,  step: 0.1 },
-    { key: 'free_churn_rate_new', label: 'Free Churn Rate (New)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 0.3,   min: 0, max: 10,   step: 0.01 },
+    { key: 'free_churn_rate_new', label: 'Free Churn Rate (New)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 30,    min: 0, max: 100,  step: 0.1 },
 
     // === Paid Churn ===
     { key: 'paid_churn_rate_old', label: 'Paid Churn Rate (Old)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 4.6,   min: 0, max: 100,  step: 0.1 },
