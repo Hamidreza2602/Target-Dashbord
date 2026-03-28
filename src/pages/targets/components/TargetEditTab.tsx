@@ -3,7 +3,6 @@ import { useAppStore } from '../../../store/appStore';
 import { TargetVersion, TargetMetric, Objective } from '../../../types';
 import { formatMetricValue } from '../../../utils/format';
 import { ChevronDown, ChevronRight, Zap } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 const PATH_TYPE_LABELS = { linear: 'Linear', front_loaded: 'Front-loaded', back_loaded: 'Back-loaded' } as const;
 
@@ -71,36 +70,6 @@ export default function TargetEditTab({ version }: { version: TargetVersion }) {
                   </tbody>
                 </table>
 
-                {/* Mini chart for this objective */}
-                {metrics.length > 0 && metrics[0].periods.length > 0 && (
-                  <div className="p-4 border-t bg-gray-50/50">
-                    <ResponsiveContainer width="100%" height={180}>
-                      <LineChart data={metrics[0].periods.map((p, i) => {
-                        const point: Record<string, any> = { month: p.periodMonth.substring(5) };
-                        metrics.forEach(m => {
-                          point[m.displayName] = m.periods[i]?.targetValue;
-                        });
-                        return point;
-                      })}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                        <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} />
-                        <Tooltip contentStyle={{ fontSize: 11 }} />
-                        <Legend wrapperStyle={{ fontSize: 10 }} />
-                        {metrics.map((m, i) => (
-                          <Line
-                            key={m.id}
-                            type="monotone"
-                            dataKey={m.displayName}
-                            stroke={['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6]}
-                            strokeWidth={2}
-                            dot={false}
-                          />
-                        ))}
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
               </div>
             )}
           </div>

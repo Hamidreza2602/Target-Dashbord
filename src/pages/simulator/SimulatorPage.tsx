@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { inputDrivers } from '../../data/metricDefinitions';
 import { formatCurrency, formatNumber, formatPercent } from '../../utils/format';
@@ -6,9 +6,10 @@ import { exportToCSV, forecastToCSVData } from '../../utils/csv';
 import { categoryLabels } from '../../data/metricDefinitions';
 import { DriverConfig, MetricCategory } from '../../types';
 import { format, parse } from 'date-fns';
+import { DRIVER_HISTORY, computeTrend } from '../../data/driverHistory';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import {
   Save, Copy, Download, RefreshCw, Target, AlertTriangle, ChevronDown, ChevronRight,
@@ -25,7 +26,8 @@ function formatMonthLabel(yyyymm: string): string {
 export default function SimulatorPage() {
   const {
     forecastMonths, forecastWarnings, drivers, forecastStartDate, forecastEndDate,
-    updateDriver, updateDriverMonth, resetDriverMonth, setForecastDates, runSimulation,
+    updateDriver, updateDriverMonth, batchUpdateDriverMonths, resetAllDrivers,
+    resetDriverMonth, setForecastDates, runSimulation,
     scenarios, activeScenarioId, saveScenario, duplicateScenario, createTargetFromScenario,
   } = useAppStore();
 
@@ -81,8 +83,8 @@ export default function SimulatorPage() {
           <p className="text-sm text-gray-500 mt-1">Model future outcomes by adjusting business drivers</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => runSimulation()} className="btn-secondary flex items-center gap-1.5">
-            <RefreshCw size={15} /> Refresh
+          <button onClick={() => resetAllDrivers()} className="btn-secondary flex items-center gap-1.5">
+            <RefreshCw size={15} /> Reset
           </button>
           <button onClick={() => setShowSaveModal(true)} className="btn-secondary flex items-center gap-1.5">
             <Save size={15} /> Save
@@ -128,11 +130,24 @@ export default function SimulatorPage() {
       {/* Summary Cards */}
       {lastMonth && firstMonth && (
         <div className="grid grid-cols-5 gap-4 mb-5">
-          <SummaryCard label="End Total Rev" value={formatCurrency(lastMonth.totalRevenue)} change={((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100).toFixed(1)} />
+          {/* Total MRR with stream breakdown */}
+          <div className="card p-4">
+            <p className="text-xs text-gray-500 font-medium">Total MRR</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{formatCurrency(lastMonth.totalRevenue)}</p>
+            <p className={`text-xs mt-1 ${((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100) >= 0 ? '+' : ''}
+              {((lastMonth.totalRevenue - firstMonth.totalRevenue) / Math.max(1, firstMonth.totalRevenue) * 100).toFixed(1)}% over period
+            </p>
+            <div className="mt-2 pt-2 border-t border-gray-100 flex flex-col gap-0.5 text-[10px] text-gray-500">
+              <div className="flex justify-between"><span>Recurring</span><span className="font-semibold text-gray-700">{formatCurrency(lastMonth.mrrRecurring)}</span></div>
+              <div className="flex justify-between"><span>Preorder</span><span className="font-semibold text-emerald-600">{formatCurrency(lastMonth.mrrPreorder)}</span></div>
+              <div className="flex justify-between"><span>SMS</span><span className="font-semibold text-purple-600">{formatCurrency(lastMonth.mrrSMS)}</span></div>
+            </div>
+          </div>
           <SummaryCard label="End Customers" value={formatNumber(lastMonth.customers)} change={((lastMonth.customers - firstMonth.customers) / Math.max(1, firstMonth.customers) * 100).toFixed(1)} />
+          <SummaryCard label="End Free Users" value={formatNumber(lastMonth.freeUsers)} change={((lastMonth.freeUsers - firstMonth.freeUsers) / Math.max(1, firstMonth.freeUsers) * 100).toFixed(1)} />
           <SummaryCard label="End NRR" value={formatPercent(lastMonth.nrr)} />
-          <SummaryCard label="End ARPU" value={formatCurrency(lastMonth.arpuRecurring)} />
-          <SummaryCard label="End CLV" value={formatCurrency(lastMonth.clv)} />
+          <SummaryCard label="End GRR" value={formatPercent(lastMonth.grr)} />
         </div>
       )}
 
@@ -205,7 +220,7 @@ export default function SimulatorPage() {
           <p className="text-xs text-gray-500 mt-0.5">Adjust drivers to see their impact on forecast outputs</p>
         </div>
 
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           {Object.entries(driversByCategory).map(([category, catDrivers]) => (
             <div key={category} className="card overflow-hidden">
               <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
@@ -235,8 +250,10 @@ export default function SimulatorPage() {
               driver={drivers[showMonthlyEditor]}
               months={forecastMonths.map(m => m.month)}
               onMonthChange={(month, val) => updateDriverMonth(showMonthlyEditor, month, val)}
+              onBatchMonthChange={vals => batchUpdateDriverMonths(showMonthlyEditor, vals)}
               onResetMonth={(month) => resetDriverMonth(showMonthlyEditor, month)}
               onClose={() => setShowMonthlyEditor(null)}
+              onGlobalChange={val => updateDriver(showMonthlyEditor, val)}
             />
           </div>
         )}
@@ -336,7 +353,49 @@ function CompactDriverRow({
   isMonthlyOpen: boolean;
   onToggleMonthly: () => void;
 }) {
+  // Lock baseline at mount — slider is always relative to this
+  const [originalValue] = useState(driver.defaultValue);
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
+
+  // Slider is %-based: -100% .. 0 .. +100% (symmetric → thumb at visual center = no change)
+  const SLIDER_MIN = -100;
+  const SLIDER_MAX = 100;
+
+  const currentVal = driver.defaultValue;
+  const pctChange = originalValue !== 0
+    ? ((currentVal - originalValue) / Math.abs(originalValue)) * 100
+    : 0;
+  // Clamp to slider range for the thumb position
+  const sliderPct = Math.max(SLIDER_MIN, Math.min(SLIDER_MAX, pctChange));
+
+  const pctLabel = Math.abs(pctChange) < 0.05
+    ? '0%'
+    : `${pctChange > 0 ? '+' : ''}${pctChange.toFixed(1)}%`;
+  const pctColor = pctChange > 0.05
+    ? 'text-emerald-600'
+    : pctChange < -0.05
+      ? 'text-red-500'
+      : 'text-gray-400';
+
+  // Slider → actual value (integers stay integers; rates rounded to 1 decimal)
+  const handleSliderChange = (pct: number) => {
+    const raw = originalValue * (1 + pct / 100);
+    const step = driver.step ?? 1;
+    const snapped = step >= 1 ? Math.round(raw) : parseFloat(raw.toFixed(1));
+    const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
+    onGlobalChange(clamped);
+  };
+
+  // Track gradient: gray by default; color only the filled segment from center → thumb
+  // thumbTrackPct maps sliderPct (-100..+100) to track position (0..100%)
+  const thumbTrackPct = (sliderPct + 100) / 2; // center = 50%
+  const trackBg = Math.abs(pctChange) < 0.05
+    ? '#d1d5db'
+    : pctChange > 0
+      // positive: green fill from center(50%) to thumb
+      ? `linear-gradient(to right, #d1d5db 0%, #d1d5db 50%, #4ade80 50%, #16a34a ${thumbTrackPct}%, #d1d5db ${thumbTrackPct}%, #d1d5db 100%)`
+      // negative: red fill from thumb to center(50%)
+      : `linear-gradient(to right, #d1d5db 0%, #d1d5db ${thumbTrackPct}%, #dc2626 ${thumbTrackPct}%, #fca5a5 50%, #d1d5db 50%, #d1d5db 100%)`;
 
   return (
     <div className={`py-2 px-3 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
@@ -345,109 +404,372 @@ function CompactDriverRow({
           <span className="text-[11px] font-medium text-gray-700">{driver.label}</span>
           {hasOverrides && <span className="text-[9px] ml-1 text-blue-500 font-bold">CUSTOM</span>}
         </div>
-        <button onClick={onToggleMonthly} className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
+        <button
+          onClick={onToggleMonthly}
+          className={`text-[10px] whitespace-nowrap font-medium ${isMonthlyOpen ? 'text-blue-800' : 'text-blue-600 hover:text-blue-800'}`}>
           {isMonthlyOpen ? 'Close' : 'Monthly'}
         </button>
       </div>
+
       <div className="flex items-center gap-1.5">
         {driver.unit === 'currency' && <span className="text-gray-400 text-[10px]">$</span>}
         <input
           type="number"
           value={driver.defaultValue}
           onChange={e => onGlobalChange(parseFloat(e.target.value) || 0)}
-          className="input-field w-16 text-xs py-1"
+          className="input-field w-24 text-xs py-1"
           step={driver.step}
           min={driver.min}
           max={driver.max}
         />
         {driver.unit === 'percent' && <span className="text-gray-400 text-[10px]">%</span>}
-        <input
-          type="range"
-          value={driver.defaultValue}
-          onChange={e => onGlobalChange(parseFloat(e.target.value))}
-          className="flex-1 h-1 accent-blue-500"
-          step={driver.step}
-          min={driver.min}
-          max={driver.max}
-        />
+
+        {/* % change label + delta slider stacked */}
+        <div className="flex-1 flex flex-col">
+          {/* % badge — centered above the track */}
+          <div className="flex justify-center mb-0.5">
+            <span className={`text-[9px] font-bold tabular-nums leading-none ${pctColor}`}>
+              {pctLabel}
+            </span>
+          </div>
+
+          {/* Track + thumb */}
+          <div className="relative h-4 flex items-center">
+            {/* Dynamic track: gray when at 0, colored fill from center to thumb */}
+            <div
+              className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
+              style={{ background: trackBg }}
+            />
+            {/* Center pin at 50% — marks the "no change" position */}
+            <div
+              className="absolute w-0.5 h-3 rounded-full bg-slate-400 pointer-events-none"
+              style={{ left: '50%', transform: 'translateX(-50%)' }}
+            />
+            <input
+              type="range"
+              value={sliderPct}
+              min={SLIDER_MIN}
+              max={SLIDER_MAX}
+              step={0.1}
+              onChange={e => handleSliderChange(parseFloat(e.target.value))}
+              className="delta-slider"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 function MonthlyEditorPanel({
-  driver, months, onMonthChange, onResetMonth, onClose,
+  driver, months, onMonthChange, onBatchMonthChange, onResetMonth, onClose, onGlobalChange,
 }: {
   driver: DriverConfig;
   months: string[];
   onMonthChange: (month: string, val: number) => void;
+  onBatchMonthChange: (vals: Record<string, number>) => void;
   onResetMonth: (month: string) => void;
   onClose: () => void;
+  onGlobalChange: (val: number) => void;
 }) {
-  const [targetValue, setTargetValue] = useState<number | null>(null);
+  type HistWindow = '6' | '12' | 'all';
+  type ProjType = 'linear' | 'curve' | 'seasonal';
+
+  const [histWindow, setHistWindow] = useState<HistWindow>('12');
+  const [projType, setProjType] = useState<ProjType>('linear');
+  const [targetValue, setTargetValue] = useState<number>(driver.defaultValue);
+
+  // Keep targetValue in sync with the top driver box (driver.defaultValue).
+  // Also re-run the projection so monthlyValues (which the forecast engine uses)
+  // stay in sync — otherwise changing the top-row slider has no visible effect
+  // because the forecast reads monthlyValues, not defaultValue.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setTargetValue(driver.defaultValue);
+    runProjection(projType, driver.defaultValue);
+  }, [driver.defaultValue]); // intentionally excludes projType/runProjection to fire only on external value changes
+
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
+  const historyData = DRIVER_HISTORY[driver.key] ?? {};
+  const hasHistory = Object.keys(historyData).length > 0;
+  const isInteger = (driver.step ?? 0.01) >= 1;
+
+  // When the user drags a dot or edits a cell manually, sync the gauge to the
+  // last forecast month value so the gauge always reflects "where the forecast ends up".
+  // This is display-only (setTargetValue only) — no projection re-run, no store write.
+  const lastForecastMonthKey = months[months.length - 1];
+  const lastForecastVal = lastForecastMonthKey !== undefined
+    ? (driver.monthlyValues[lastForecastMonthKey] ?? driver.defaultValue)
+    : undefined;
+  useEffect(() => {
+    if (lastForecastVal !== undefined) {
+      setTargetValue(lastForecastVal);
+    }
+  }, [lastForecastVal]);
+
+  // Baseline for the gauge: last historical value (same as projection startVal)
+  const gaugeHistMonths = Object.keys(historyData).sort();
+  const gaugeLastHistKey = gaugeHistMonths[gaugeHistMonths.length - 1];
+  const gaugeOriginal = gaugeLastHistKey !== undefined && historyData[gaugeLastHistKey] !== undefined
+    ? historyData[gaugeLastHistKey]
+    : driver.defaultValue;
+
+  // Target gauge: % change of targetValue vs historical baseline
+  // Symmetric ±100 range so 0% is always visually at the exact center (50%)
+  const GAUGE_MIN = -100;
+  const GAUGE_MAX = 100;
+  const centerTrackPct = 50; // always at 50% since range is symmetric
+  const tgtPct = gaugeOriginal !== 0
+    ? ((targetValue - gaugeOriginal) / Math.abs(gaugeOriginal)) * 100
+    : 0;
+  const tgtTrackPct = Math.max(0, Math.min(100,
+    ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
+  ));
+  const tgtPctLabel = Math.abs(tgtPct) < 0.05 ? '0%' : `${tgtPct > 0 ? '+' : ''}${tgtPct.toFixed(1)}%`;
+  const tgtPctColor = tgtPct > 0.05 ? 'text-emerald-600' : tgtPct < -0.05 ? 'text-red-500' : 'text-gray-400';
+  const tgtTrackBg = Math.abs(tgtPct) < 0.05
+    ? '#d1d5db'
+    : tgtPct > 0
+      ? `linear-gradient(to right,#d1d5db 0%,#d1d5db ${centerTrackPct}%,#22c55e ${centerTrackPct}%,#16a34a ${tgtTrackPct}%,#d1d5db ${tgtTrackPct}%,#d1d5db 100%)`
+      : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${tgtTrackPct}%,#dc2626 ${tgtTrackPct}%,#fca5a5 ${centerTrackPct}%,#d1d5db ${centerTrackPct}%,#d1d5db 100%)`;
+  const handleTargetGauge = (sliderVal: number) => {
+    const rawTarget = gaugeOriginal * (1 + sliderVal / 100);
+    const step = driver.step ?? 1;
+    const snapped = step >= 1 ? Math.round(rawTarget) : parseFloat(rawTarget.toFixed(1));
+    const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
+    setTargetValue(clamped);
+    onGlobalChange(clamped);   // ← keeps top number input in sync
+    runProjection(projType, clamped);
+  };
 
   const effectiveMonthlyValues = useMemo(() => {
     const result: Record<string, number> = {};
-    const n = months.length;
-    const startVal = driver.defaultValue;
-    const endVal = targetValue ?? driver.defaultValue;
-
-    months.forEach((m, i) => {
-      if (driver.monthlyValues[m] !== undefined) {
-        result[m] = driver.monthlyValues[m];
-      } else if (targetValue !== null) {
-        result[m] = Math.round((startVal + ((i + 1) / n) * (endVal - startVal)) * 100) / 100;
-      } else {
-        result[m] = driver.defaultValue;
-      }
+    months.forEach(m => {
+      result[m] = driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : driver.defaultValue;
     });
     return result;
-  }, [driver.defaultValue, driver.monthlyValues, targetValue, months]);
+  }, [driver.defaultValue, driver.monthlyValues, months]);
 
-  const applyLinearRamp = (target: number) => {
-    setTargetValue(target);
+  const chartData = useMemo(() => {
+    const allHistMonths = Object.keys(historyData).sort();
+    const windowedHist = histWindow === 'all'
+      ? allHistMonths
+      : allHistMonths.slice(-(parseInt(histWindow)));
+
+    const lastHistMonth = windowedHist[windowedHist.length - 1];
+
+    // Historical points; the LAST one also gets a forecast value so the
+    // dashed forecast line starts right at the historical end — no gap.
+    const histPoints = windowedHist.map(m => ({
+      month: formatMonthLabel(m),
+      monthKey: null as string | null,
+      historical: historyData[m],
+      forecast: m === lastHistMonth ? (historyData[m] ?? null) : null,
+    }));
+
+    // Forecast points start from the month AFTER the last historical month.
+    // No bridge needed here — the bridge is already in histPoints above.
+    const forecastPoints = months.map(m => ({
+      month: formatMonthLabel(m),
+      monthKey: m,
+      historical: null as number | null,
+      forecast: effectiveMonthlyValues[m],
+    }));
+
+    return [...histPoints, ...forecastPoints];
+  }, [historyData, histWindow, months, effectiveMonthlyValues]);
+
+  const round = useCallback((v: number) => isInteger ? Math.round(v) : Math.round(v * 100) / 100, [isInteger]);
+
+  // ── Draggable chart dots ──────────────────────────────────────────────────
+  const dragRef = useRef<{
+    active: boolean;
+    monthKey: string;
+    startY: number;
+    startVal: number;
+    yMin: number;
+    yMax: number;
+  }>({ active: false, monthKey: '', startY: 0, startVal: 0, yMin: 0, yMax: 0 });
+
+  // Keep a stable ref to handleMonthChange so the effect doesn't need to re-register
+  const handleMonthChangeRef = useRef<(month: string, val: number) => void>(() => {});
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragRef.current.active) return;
+      const { monthKey, startY, startVal, yMin, yMax } = dragRef.current;
+      const chartPlotHeight = 132; // 160px height − ~28px margins
+      const valueRange = yMax - yMin || 1;
+      const deltaY = e.clientY - startY;
+      const deltaVal = -deltaY * (valueRange / chartPlotHeight);
+      const newVal = isInteger
+        ? Math.round(startVal + deltaVal)
+        : Math.round((startVal + deltaVal) * 100) / 100;
+      const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, newVal));
+      handleMonthChangeRef.current(monthKey, clamped);
+    };
+    const onMouseUp = () => { dragRef.current.active = false; };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const runProjection = useCallback((type: ProjType, endVal: number) => {
+    if (months.length === 0) return;
+    // Start from last known historical value (not driver.defaultValue) so
+    // the projection interpolates from current reality → target end value.
+    const histMonths = Object.keys(historyData).sort();
+    const lastHistKey = histMonths[histMonths.length - 1];
+    const startVal = lastHistKey !== undefined && historyData[lastHistKey] !== undefined
+      ? historyData[lastHistKey]
+      : driver.defaultValue;
     const n = months.length;
-    const start = driver.defaultValue;
-    months.forEach((m, i) => {
-      if (driver.monthlyValues[m] === undefined) {
-        const val = Math.round((start + ((i + 1) / n) * (target - start)) * 100) / 100;
-        onMonthChange(m, val);
+
+    // Compute all values first, THEN batch-write in a single store operation
+    // (prevents intermediate renders showing driver.defaultValue for un-written months)
+    let newValues: Record<string, number> = {};
+
+    if (type === 'linear') {
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        newValues[m] = round(startVal + (endVal - startVal) * t);
+      });
+    } else if (type === 'curve') {
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        newValues[m] = round(startVal + (endVal - startVal) * t * t);
+      });
+    } else {
+      // Trend Learning: linear slope + additive seasonal fluctuations
+      const allHistVals = Object.values(historyData);
+      if (allHistVals.length === 0) {
+        months.forEach((m, i) => {
+          const t = n > 1 ? i / (n - 1) : 1;
+          newValues[m] = round(startVal + (endVal - startVal) * t);
+        });
+      } else {
+        const overallAvg = allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length;
+        const byMoY: Record<number, number[]> = {};
+        Object.entries(historyData).forEach(([month, val]) => {
+          const moy = parseInt(month.split('-')[1]) - 1;
+          if (!byMoY[moy]) byMoY[moy] = [];
+          byMoY[moy].push(val);
+        });
+        const seasonalAdj: Record<number, number> = {};
+        for (let i = 0; i < 12; i++) {
+          seasonalAdj[i] = byMoY[i]
+            ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg
+            : 0;
+        }
+        const raw = months.map((m, i) => {
+          const t = n > 1 ? i / (n - 1) : 1;
+          const base = startVal + (endVal - startVal) * t;
+          const moy = parseInt(m.split('-')[1]) - 1;
+          return base + (seasonalAdj[moy] ?? 0);
+        });
+        const endOffset = endVal - raw[raw.length - 1];
+        months.forEach((m, i) => { newValues[m] = round(raw[i] + endOffset); });
       }
-    });
+    }
+    // Single atomic write → one simulation run → no flickering intermediate state
+    onBatchMonthChange(newValues);
+  }, [months, driver.defaultValue, driver.step, historyData, round, onBatchMonthChange]);
+
+  // Auto-run projection when the panel first opens (no overrides yet)
+  // so months immediately ramp from the last historical value to the target,
+  // instead of staying flat at driver.defaultValue.
+  useEffect(() => {
+    if (Object.keys(driver.monthlyValues).length === 0) {
+      runProjection('linear', targetValue);
+    }
+    // intentionally runs once on mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleProjTypeChange = (type: ProjType) => {
+    setProjType(type);
+    runProjection(type, targetValue);
   };
 
-  const resetAll = () => {
-    setTargetValue(null);
-    months.forEach(m => onResetMonth(m));
-  };
+  const handleMonthChange = useCallback((month: string, val: number) => {
+    onMonthChange(month, val);
+  }, [onMonthChange]);
+
+  // Keep drag ref in sync with latest handleMonthChange
+  handleMonthChangeRef.current = handleMonthChange;
+
+  // Y-domain for drag pixel→value conversion
+  const chartYDomain = useMemo(() => {
+    const allVals = chartData.flatMap(d =>
+      [d.historical, d.forecast].filter((v): v is number => v !== null && v !== undefined)
+    );
+    if (allVals.length === 0) return { min: 0, max: 100 };
+    const mn = Math.min(...allVals);
+    const mx = Math.max(...allVals);
+    const pad = (mx - mn) * 0.1 || 10;
+    return { min: mn - pad, max: mx + pad };
+  }, [chartData]);
+
+  // Custom draggable dot for forecast line (render-function form for correct prop passing)
+  const ForecastDot = useCallback((props: any) => {
+    const { cx, cy, payload } = props;
+    if (cx == null || cy == null) return null;
+    if (!payload?.monthKey || payload.forecast == null) return null;
+    return (
+      <g key={payload.monthKey}>
+        {/* Larger invisible hit area */}
+        <circle
+          cx={cx} cy={cy} r={10}
+          fill="transparent"
+          style={{ cursor: 'ns-resize' }}
+          onMouseDown={(e: React.MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragRef.current = {
+              active: true,
+              monthKey: payload.monthKey,
+              startY: e.clientY,
+              startVal: payload.forecast,
+              yMin: chartYDomain.min,
+              yMax: chartYDomain.max,
+            };
+          }}
+        />
+        {/* Visual dot */}
+        <circle cx={cx} cy={cy} r={5} fill="#8b5cf6" stroke="white" strokeWidth={2}
+          style={{ pointerEvents: 'none' }} />
+      </g>
+    );
+  }, [chartYDomain]);
+
+  const resetAll = () => months.forEach(m => onResetMonth(m));
+  const refLineLabel = months[0] ? formatMonthLabel(months[0]) : '';
 
   return (
     <div className="border-t-2 border-blue-400 bg-gradient-to-b from-blue-50/60 to-white px-6 py-4">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-6">
+      {/* Header — no Save button, all changes auto-save */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-4">
           <h4 className="text-sm font-semibold text-gray-900">{driver.label}</h4>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">Start:</span>
-              <span className="text-xs font-semibold text-gray-800">{driver.defaultValue}{unitLabel}</span>
+          {hasHistory && (
+            <div className="flex items-center gap-1 text-[11px]">
+              <span className="text-gray-400 mr-1">History:</span>
+              {(['6', '12', 'all'] as HistWindow[]).map(w => (
+                <button key={w} onClick={() => setHistWindow(w)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-medium ${histWindow === w ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  {w === 'all' ? 'All' : `${w}M`}
+                </button>
+              ))}
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">Target:</span>
-              <input
-                type="number"
-                value={targetValue ?? driver.defaultValue}
-                onChange={e => applyLinearRamp(parseFloat(e.target.value) || 0)}
-                className="input-field w-24 text-xs py-1"
-                step={driver.step}
-              />
-              <span className="text-xs text-gray-400">{unitLabel}</span>
-            </div>
-          </div>
+          )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {hasOverrides && (
             <button onClick={resetAll} className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700">
               <RotateCcw size={11} /> Reset all
@@ -457,63 +779,151 @@ function MonthlyEditorPanel({
         </div>
       </div>
 
-      {/* Monthly grid - full width, well spaced */}
-      <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${Math.min(months.length, 12)}, minmax(0, 1fr))` }}>
-        {months.slice(0, 12).map(m => {
-          const hasOverride = driver.monthlyValues[m] !== undefined;
-          const val = effectiveMonthlyValues[m];
-          return (
-            <div key={m} className="flex flex-col items-center">
-              <span className="text-[10px] text-gray-500 mb-1 font-medium">{formatMonthLabel(m)}</span>
-              <input
-                type="number"
-                value={val}
-                onChange={e => onMonthChange(m, parseFloat(e.target.value) || 0)}
-                className={`input-field w-full text-xs text-center py-1.5 px-1 ${
-                  hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' :
-                  targetValue !== null ? 'border-purple-200 bg-purple-50/40' : ''
-                }`}
-                step={driver.step}
-              />
-              {hasOverride && (
-                <button onClick={() => onResetMonth(m)} className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
+      {/* Chart */}
+      {chartData.length > 0 && (
+        <div className="mb-4 bg-white rounded-lg border border-gray-100 p-3">
+          <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
+            <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
+            <span className="ml-auto flex items-center gap-1 text-purple-400 italic">drag dots ↕</span>
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+              <YAxis tick={{ fontSize: 9 }} width={40}
+                domain={[chartYDomain.min, chartYDomain.max]}
+                tickFormatter={v => unitLabel === '$' ? `$${v}` : `${v}${unitLabel}`} />
+              <Tooltip contentStyle={{ fontSize: 11 }}
+                formatter={(v: any) => [`${unitLabel === '$' ? '$' : ''}${v}${unitLabel !== '$' ? unitLabel : ''}`, '']} />
+              {refLineLabel && (
+                <ReferenceLine x={refLineLabel} stroke="#cbd5e1" strokeDasharray="4 2"
+                  label={{ value: 'Now', position: 'top', fontSize: 9, fill: '#94a3b8' }} />
               )}
-            </div>
-          );
-        })}
-      </div>
-      {months.length > 12 && (
-        <div className="grid gap-2 mt-3" style={{ gridTemplateColumns: `repeat(${months.length - 12}, minmax(0, 1fr))` }}>
-          {months.slice(12).map(m => {
-            const hasOverride = driver.monthlyValues[m] !== undefined;
-            const val = effectiveMonthlyValues[m];
-            return (
-              <div key={m} className="flex flex-col items-center">
-                <span className="text-[10px] text-gray-500 mb-1 font-medium">{formatMonthLabel(m)}</span>
-                <input
-                  type="number"
-                  value={val}
-                  onChange={e => onMonthChange(m, parseFloat(e.target.value) || 0)}
-                  className={`input-field w-full text-xs text-center py-1.5 px-1 ${
-                    hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' :
-                    targetValue !== null ? 'border-purple-200 bg-purple-50/40' : ''
-                  }`}
-                  step={driver.step}
-                />
-                {hasOverride && (
-                  <button onClick={() => onResetMonth(m)} className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
-                )}
-              </div>
-            );
-          })}
+              <Line type="monotone" dataKey="historical" stroke="#3b82f6" strokeWidth={2}
+                dot={{ r: 2, fill: '#3b82f6' }} connectNulls={false} isAnimationActive={false} name="Historical" />
+              <Line type="monotone" dataKey="forecast" stroke="#8b5cf6" strokeWidth={2}
+                strokeDasharray="5 4" dot={(p: any) => <ForecastDot {...p} />}
+                activeDot={false} connectNulls={false} isAnimationActive={false} name="Forecast" />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
 
-      {targetValue !== null && (
-        <p className="text-[10px] text-purple-500 mt-2">
-          Linear ramp from {driver.defaultValue}{unitLabel} to {targetValue}{unitLabel} applied. Override individual months as needed.
-        </p>
-      )}
+      {/* Projection Controls */}
+      <div className="flex items-center gap-2 mb-4 p-3 bg-white rounded-lg border border-gray-100">
+        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Target:</span>
+        {unitLabel === '$' && <span className="text-gray-400 text-xs">$</span>}
+        <input
+          type="number"
+          value={targetValue}
+          onChange={e => { const v = parseFloat(e.target.value) || 0; setTargetValue(v); onGlobalChange(v); runProjection(projType, v); }}
+          className="input-field w-24 text-xs py-1 text-center"
+          step={driver.step}
+        />
+        {unitLabel === '%' && <span className="text-gray-400 text-xs">%</span>}
+
+        {/* Target gauge — % vs historical baseline, auto-reruns projection */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex justify-center mb-0.5">
+            <span className={`text-[9px] font-bold tabular-nums ${tgtPctColor}`}>{tgtPctLabel}</span>
+          </div>
+          <div className="relative h-3.5 flex items-center">
+            <div className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
+              style={{ background: tgtTrackBg }} />
+            {/* Center marker at 0% change */}
+            <div className="absolute w-0.5 h-2.5 rounded-full bg-slate-400 pointer-events-none"
+              style={{ left: `${centerTrackPct}%`, transform: 'translateX(-50%)' }} />
+            <input
+              type="range"
+              value={Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct))}
+              min={GAUGE_MIN} max={GAUGE_MAX} step={isInteger ? 1 : 0.1}
+              onChange={e => handleTargetGauge(parseFloat(e.target.value))}
+              className="delta-slider"
+            />
+          </div>
+        </div>
+
+        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Projection:</span>
+        <select value={projType} onChange={e => handleProjTypeChange(e.target.value as ProjType)}
+          className="input-field text-xs py-1">
+          <option value="linear">Linear</option>
+          <option value="curve">Curve</option>
+          <option value="seasonal">Trend Learning</option>
+        </select>
+      </div>
+
+      {/* Monthly grid: historical (gray, read-only) + forecast (editable) */}
+      {(() => {
+        const forecastSlices = [months.slice(0, 12), months.slice(12)].filter(s => s.length > 0);
+        const histSorted = Object.keys(historyData).sort();
+        // Show as many historical months as the first forecast row width
+        const firstRowLen = forecastSlices[0]?.length ?? 12;
+        const histSlice = histSorted.slice(-firstRowLen);
+
+        return forecastSlices.map((slice, si) => (
+          <div key={si} className={si > 0 ? 'mt-4' : ''}>
+            {/* Historical row (only above the first forecast slice) */}
+            {si === 0 && histSlice.length > 0 && (
+              <>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide">Historical</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-[9px] font-semibold text-blue-500 uppercase tracking-wide">Forecast</span>
+                </div>
+                <div className="grid gap-2 mb-1"
+                  style={{ gridTemplateColumns: `repeat(${firstRowLen}, minmax(0, 1fr))` }}>
+                  {/* Pad left if hist has fewer months than firstRowLen */}
+                  {Array.from({ length: firstRowLen - histSlice.length }).map((_, i) => (
+                    <div key={`pad-${i}`} />
+                  ))}
+                  {histSlice.map(hm => {
+                    const hVal = historyData[hm];
+                    const display = isInteger
+                      ? Math.round(hVal).toLocaleString()
+                      : hVal.toFixed(1);
+                    return (
+                      <div key={hm} className="flex flex-col items-center">
+                        <span className="text-[9px] text-gray-400 mb-0.5 font-medium">{formatMonthLabel(hm)}</span>
+                        <div className="w-full text-center text-xs py-1.5 px-1 rounded-md bg-gray-100 text-gray-400 font-medium select-none border border-gray-200">
+                          {display}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* Forecast row (editable) */}
+            <div className="grid gap-2"
+              style={{ gridTemplateColumns: `repeat(${slice.length}, minmax(0, 1fr))` }}>
+              {slice.map(m => {
+                const hasOverride = driver.monthlyValues[m] !== undefined;
+                const val = effectiveMonthlyValues[m];
+                return (
+                  <div key={m} className="flex flex-col items-center">
+                    <span className="text-[10px] text-gray-500 mb-0.5 font-medium">{formatMonthLabel(m)}</span>
+                    <input
+                      type="number"
+                      value={isInteger ? Math.round(val) : val}
+                      onChange={e => handleMonthChange(m, isInteger
+                        ? Math.round(parseFloat(e.target.value) || 0)
+                        : (parseFloat(e.target.value) || 0))}
+                      className={`input-field w-full text-xs text-center py-1.5 px-1 ${hasOverride ? 'border-blue-400 bg-blue-50 font-semibold' : ''}`}
+                      step={isInteger ? 1 : driver.step}
+                    />
+                    {hasOverride && (
+                      <button onClick={() => { onResetMonth(m); }}
+                        className="text-[9px] text-red-400 mt-0.5 hover:text-red-600">reset</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ));
+      })()}
     </div>
   );
 }

@@ -193,14 +193,16 @@ export interface ForecastMonth {
   oldBackToFree: number;            // customers[m-1] * backToFreeRateOld
 
   // === Revenue ===
-  mrrRecurring: number;             // customers * arpuRecurring
-  arpuRecurring: number;            // MRR / customers (derived)
+  mrrRecurring: number;             // ARPURecurringOld × (oldPaid + oldFreeConverts) + newInstalls × ARPURecurringNew
+  arpuRecurring: number;            // mrrRecurring / customers (blended, for display)
+  arpuRecurringOld: number;         // MRRRecurring[m-1] / PaidUser[m-1] (derived, not a driver)
+  arpuRecurringNew: number;         // ARPU for new customers from installs (driver input)
 
-  mrrPreorder: number;              // customers * preorderPct * arpuPreorder
+  mrrPreorder: number;              // PaidUser[m] * preorderPct * arpuPreorder
   preorderCustomersPct: number;
   arpuPreorder: number;
 
-  mrrSMS: number;                   // customers * smsPct * arpuSMS
+  mrrSMS: number;                   // PaidUser[m] * smsPct * arpuSMS
   smsCustomersPct: number;
   arpuSMS: number;
 
@@ -213,6 +215,7 @@ export interface ForecastMonth {
   paidChurnRateNew: number;
   paidChurnRateOld: number;
   userConversionRateNew: number;
+  conversionRateOld: number;        // old free → paid conversion rate (mid-month ½ factor)
   backToFreeRateNew: number;
   backToFreeRateOld: number;
 

@@ -5,6 +5,7 @@ import { runForecast, createDefaultDrivers, ForecastWarning } from '../engine/fo
 import { generateTargetPath } from '../utils/targetPaths';
 import { SIMULATOR_DRIVER_MAPPING } from '../data/metricDefinitions';
 import { addMonths, format } from 'date-fns';
+import { DRIVER_HISTORY } from '../data/driverHistory';
 
 interface AppState {
   // App
@@ -34,6 +35,8 @@ interface AppState {
   setActiveScenario: (id: string) => void;
   updateDriver: (key: string, value: number) => void;
   updateDriverMonth: (key: string, month: string, value: number) => void;
+  batchUpdateDriverMonths: (key: string, monthValues: Record<string, number>) => void;
+  resetAllDrivers: () => void;
   resetDriverMonth: (key: string, month: string) => void;
   runSimulation: () => void;
   setForecastDates: (start: string, end: string) => void;
@@ -65,8 +68,12 @@ interface AppState {
   setForecastAsTarget: (targetPlanId: string) => void;
 }
 
-const defaultStart = format(new Date(), 'yyyy-MM');
-const defaultEnd = format(addMonths(new Date(), 12), 'yyyy-MM');
+// Forecast starts the month AFTER the last historical data point (not after today's date)
+// This prevents overlap regardless of the user's system clock.
+const _allHistMonths = Object.keys(DRIVER_HISTORY['installs'] ?? {}).sort();
+const _lastHistMonth = _allHistMonths[_allHistMonths.length - 1] ?? format(new Date(), 'yyyy-MM');
+const defaultStart = format(addMonths(new Date(_lastHistMonth + '-02'), 1), 'yyyy-MM');
+const defaultEnd   = format(addMonths(new Date(defaultStart   + '-02'), 12), 'yyyy-MM');
 
 export const useAppStore = create<AppState>((set, get) => {
   const initialDrivers = createDefaultDrivers(mockBaseline);
@@ -113,6 +120,28 @@ export const useAppStore = create<AppState>((set, get) => {
       get().runSimulation();
     },
 
+    // Set ALL monthly overrides for a driver at once → runs simulation only once
+    batchUpdateDriverMonths: (key, monthValues) => {
+      const { drivers } = get();
+      const driver = drivers[key];
+      set({
+        drivers: {
+          ...drivers,
+          [key]: { ...driver, monthlyValues: { ...driver.monthlyValues, ...monthValues } },
+        },
+      });
+      get().runSimulation();
+    },
+
+    // Reset ALL drivers to their baseline defaults, clear all monthly overrides
+    resetAllDrivers: () => {
+      const initialDrivers = createDefaultDrivers(
+        get().baselines.find(b => b.id === get().activeBaselineId)!
+      );
+      set({ drivers: initialDrivers });
+      get().runSimulation();
+    },
+
     resetDriverMonth: (key, month) => {
       const { drivers } = get();
       const driver = drivers[key];
@@ -125,9 +154,10 @@ export const useAppStore = create<AppState>((set, get) => {
     runSimulation: () => {
       const { drivers, forecastStartDate, forecastEndDate } = get();
       const baseline = get().baselines.find(b => b.id === get().activeBaselineId)!;
-      const start = new Date(forecastStartDate + '-01');
-      const end = new Date(forecastEndDate + '-01');
-      const months = Math.max(1, Math.round((end.getTime() - start.getTime()) / (30.44 * 24 * 60 * 60 * 1000)));
+      // Parse as LOCAL time (not UTC) to avoid timezone-shift → wrong month
+      const [sy, sm] = forecastStartDate.split('-').map(Number);
+      const [ey, em] = forecastEndDate.split('-').map(Number);
+      const months = Math.max(1, (ey - sy) * 12 + (em - sm));
       const result = runForecast({ baseline, startDate: forecastStartDate + '-01', months, drivers });
       set({ forecastMonths: result.months, forecastWarnings: result.warnings });
     },
