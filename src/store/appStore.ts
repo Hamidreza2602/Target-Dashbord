@@ -31,6 +31,10 @@ interface AppState {
   // Actuals
   actuals: ActualMetricObservation[];
 
+  // Per-driver projection type (linear | curve | seasonal | immediate)
+  driverProjTypes: Record<string, string>;
+  setDriverProjType: (key: string, type: string) => void;
+
   // Scenario Actions
   setActiveScenario: (id: string) => void;
   updateDriver: (key: string, value: number) => void;
@@ -98,6 +102,11 @@ export const useAppStore = create<AppState>((set, get) => {
     targetPlans: [mockTargetPlan],
     targetVersions: [mockTargetVersion1],
     actuals: mockActuals,
+    driverProjTypes: {},
+
+    setDriverProjType: (key, type) => set(state => ({
+      driverProjTypes: { ...state.driverProjTypes, [key]: type },
+    })),
 
     setActiveScenario: (id) => set({ activeScenarioId: id }),
 

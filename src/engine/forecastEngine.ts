@@ -206,12 +206,15 @@ export function runForecast(input: ForecastInput): ForecastResult {
 
     const churnedMrr    = oldPaidChurned * arpuRecurringOld;
     const backToFreeMrr = oldBackToFree * arpuRecurringOld;
-    const grr = prevMrr > 0
-      ? ((prevMrr - churnedMrr - backToFreeMrr) / prevMrr) * 100
-      : 100;
-    const nrr = prevMrr > 0
-      ? (mrrRecurring / prevMrr) * 100
-      : 100;
+    // Monthly retention ratios → annualized (compounded over 12 months)
+    const monthlyGrr = prevMrr > 0
+      ? (prevMrr - churnedMrr - backToFreeMrr) / prevMrr
+      : 1;
+    const monthlyNrr = prevMrr > 0
+      ? mrrRecurring / prevMrr
+      : 1;
+    const grr = Math.pow(monthlyGrr, 12) * 100;
+    const nrr = Math.pow(monthlyNrr, 12) * 100;
 
     // CLV
     const yearlyChurn = Math.min(paidChurnRateOld * 12, 1);
@@ -293,11 +296,11 @@ export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string,
     baselineKey: string; fallback: number; min?: number; max?: number; step?: number;
   }> = [
     // === Growth ===
-    { key: 'installs',            label: 'Installations',               category: 'growth_adoption', unit: 'count',   baselineKey: '_',                 fallback: 1689, min: 0, max: 10000, step: 10 },
+    { key: 'installs',            label: 'Installations',               category: 'growth_adoption', unit: 'count',   baselineKey: '_',                 fallback: 1689, min: 0, max: 100000, step: 10 },
 
     // === Conversion ===
     { key: 'user_conv_rate_new',  label: 'Conv. Rate New Free→Paid',    category: 'conversion',      unit: 'percent', baselineKey: '_',                 fallback: 13.9,  min: 0, max: 100,  step: 0.1 },
-    { key: 'conv_rate_old',       label: 'Conv. Rate Old Free→Paid',    category: 'conversion',      unit: 'percent', baselineKey: '_',                 fallback: 0.9,   min: 0, max: 20,   step: 0.1 },
+    { key: 'conv_rate_old',       label: 'Conv. Rate Old Free→Paid',    category: 'conversion',      unit: 'percent', baselineKey: '_',                 fallback: 0.9,   min: 0, max: 100,   step: 0.1 },
 
     // === Free User Churn ===
     { key: 'free_churn_rate_old', label: 'Free Churn Rate (Old)',       category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 4.8,   min: 0, max: 100,  step: 0.1 },
@@ -312,15 +315,15 @@ export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string,
     { key: 'back_to_free_rate_new', label: 'Back to Free Rate (New)',   category: 'retention_churn', unit: 'percent', baselineKey: '_',                 fallback: 1.1,   min: 0, max: 50,   step: 0.1 },
 
     // === Monetization: Recurring (new customers — old is derived from prevMRR/prevCustomers) ===
-    { key: 'arpu_recurring_new',    label: 'ARPU Recurring (New Cust)', category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 41,    min: 0, max: 500,  step: 0.5 },
+    { key: 'arpu_recurring_new',    label: 'ARPU Recurring (New Cust)', category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 41,    min: 0, max: 5000,  step: 0.5 },
 
     // === Monetization: Preorder — ARPU = Preorder Rev / (preorderPct × customers) = 60349 / (11.3% × 7980) ≈ $67 ===
     { key: 'preorder_customers_pct', label: 'Preorder Customers %',     category: 'monetization',    unit: 'percent',  baselineKey: '_',                fallback: 11.3,  min: 0, max: 100,  step: 0.5 },
-    { key: 'arpu_preorder',          label: 'ARPU Preorder',            category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 64,    min: 0, max: 500,  step: 1 },
+    { key: 'arpu_preorder',          label: 'ARPU Preorder',            category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 64,    min: 0, max: 5000,  step: 1 },
 
     // === Monetization: SMS — ARPU = SMS Rev / (smsPct × customers) = 51932 / (33.8% × 7980) ≈ $19 ===
     { key: 'sms_customers_pct',      label: 'SMS Customers %',          category: 'monetization',    unit: 'percent',  baselineKey: '_',                fallback: 33.8,  min: 0, max: 100,  step: 0.5 },
-    { key: 'arpu_sms',               label: 'ARPU SMS',                 category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 19.3,  min: 0, max: 200,  step: 0.5 },
+    { key: 'arpu_sms',               label: 'ARPU SMS',                 category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 19.3,  min: 0, max: 2000,  step: 0.5 },
   ];
 
   const result: Record<string, DriverConfig> = {};

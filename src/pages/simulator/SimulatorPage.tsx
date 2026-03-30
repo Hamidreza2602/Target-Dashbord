@@ -233,7 +233,9 @@ export default function SimulatorPage() {
                   <CompactDriverRow
                     key={driver.key}
                     driver={driver}
+                    months={forecastMonths.map(m => m.month)}
                     onGlobalChange={(val) => updateDriver(driver.key, val)}
+                    onBatchMonthChange={vals => batchUpdateDriverMonths(driver.key, vals)}
                     isMonthlyOpen={showMonthlyEditor === driver.key}
                     onToggleMonthly={() => setShowMonthlyEditor(showMonthlyEditor === driver.key ? null : driver.key)}
                   />
@@ -346,24 +348,53 @@ function SummaryCard({ label, value, change }: { label: string; value: string; c
 }
 
 function CompactDriverRow({
-  driver, onGlobalChange, isMonthlyOpen, onToggleMonthly,
+  driver, months, onGlobalChange, onBatchMonthChange, isMonthlyOpen, onToggleMonthly,
 }: {
   driver: DriverConfig;
+  months: string[];
   onGlobalChange: (val: number) => void;
+  onBatchMonthChange: (vals: Record<string, number>) => void;
   isMonthlyOpen: boolean;
   onToggleMonthly: () => void;
 }) {
-  // Lock baseline at mount — slider is always relative to this
-  const [originalValue] = useState(driver.defaultValue);
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
 
-  // Slider is %-based: -100% .. 0 .. +100% (symmetric → thumb at visual center = no change)
-  const SLIDER_MIN = -100;
-  const SLIDER_MAX = 100;
+  const historyData = DRIVER_HISTORY[driver.key] ?? {};
+  const isInteger = (driver.step ?? 0.01) >= 1;
+  const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
 
-  const currentVal = driver.defaultValue;
-  const pctChange = originalValue !== 0
-    ? ((currentVal - originalValue) / Math.abs(originalValue)) * 100
+  // Lock baseline at mount so it doesn't change when defaultValue changes
+  // (for drivers without history, defaultValue is the baseline)
+  const [baseline] = useState(() => {
+    const histMonths = Object.keys(historyData).sort();
+    const trailing6 = histMonths.slice(-6);
+    return trailing6.length > 0
+      ? trailing6.reduce((sum, m) => sum + (historyData[m] ?? 0), 0) / trailing6.length
+      : driver.defaultValue;
+  });
+
+  // Trailing 6M avg for display (same as baseline for drivers with history,
+  // locked baseline for drivers without history)
+  const histMonths = Object.keys(historyData).sort();
+  const trailing6 = histMonths.slice(-6);
+  const trailingAvg = trailing6.length > 0
+    ? trailing6.reduce((sum, m) => sum + (historyData[m] ?? 0), 0) / trailing6.length
+    : baseline;
+
+  // Forward avg across forecast months (fallback to trailingAvg so untouched = 0%)
+  const forwardAvg = useMemo(() => {
+    if (months.length === 0) return trailingAvg;
+    const vals = months.map(m => driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : trailingAvg);
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }, [months, driver.monthlyValues, trailingAvg]);
+  const forwardDisplay = isInteger ? Math.round(forwardAvg) : Math.round(forwardAvg * 10) / 10;
+
+  // Gauge: forward avg vs trailing 6M avg
+  const SLIDER_MIN = -500;
+  const SLIDER_MAX = 500;
+
+  const pctChange = trailingAvg !== 0
+    ? ((forwardAvg - trailingAvg) / Math.abs(trailingAvg)) * 100
     : 0;
   // Clamp to slider range for the thumb position
   const sliderPct = Math.max(SLIDER_MIN, Math.min(SLIDER_MAX, pctChange));
@@ -377,25 +408,27 @@ function CompactDriverRow({
       ? 'text-red-500'
       : 'text-gray-400';
 
-  // Slider → actual value (integers stay integers; rates rounded to 1 decimal)
+  // Slider → set all months uniformly so forward avg matches desired %
   const handleSliderChange = (pct: number) => {
-    const raw = originalValue * (1 + pct / 100);
+    const desiredAvg = trailingAvg * (1 + pct / 100);
     const step = driver.step ?? 1;
-    const snapped = step >= 1 ? Math.round(raw) : parseFloat(raw.toFixed(1));
+    const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
     const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
     onGlobalChange(clamped);
+    const newValues: Record<string, number> = {};
+    months.forEach(m => { newValues[m] = clamped; });
+    onBatchMonthChange(newValues);
   };
 
   // Track gradient: gray by default; color only the filled segment from center → thumb
   // thumbTrackPct maps sliderPct (-100..+100) to track position (0..100%)
-  const thumbTrackPct = (sliderPct + 100) / 2; // center = 50%
+  const thumbTrackPct = ((sliderPct - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * 100;
+  const zeroPct = ((0 - SLIDER_MIN) / (SLIDER_MAX - SLIDER_MIN)) * 100;
   const trackBg = Math.abs(pctChange) < 0.05
     ? '#d1d5db'
     : pctChange > 0
-      // positive: green fill from center(50%) to thumb
-      ? `linear-gradient(to right, #d1d5db 0%, #d1d5db 50%, #4ade80 50%, #16a34a ${thumbTrackPct}%, #d1d5db ${thumbTrackPct}%, #d1d5db 100%)`
-      // negative: red fill from thumb to center(50%)
-      : `linear-gradient(to right, #d1d5db 0%, #d1d5db ${thumbTrackPct}%, #dc2626 ${thumbTrackPct}%, #fca5a5 50%, #d1d5db 50%, #d1d5db 100%)`;
+      ? `linear-gradient(to right, #d1d5db 0%, #d1d5db ${zeroPct}%, #4ade80 ${zeroPct}%, #16a34a ${thumbTrackPct}%, #d1d5db ${thumbTrackPct}%, #d1d5db 100%)`
+      : `linear-gradient(to right, #d1d5db 0%, #d1d5db ${thumbTrackPct}%, #dc2626 ${thumbTrackPct}%, #fca5a5 ${zeroPct}%, #d1d5db ${zeroPct}%, #d1d5db 100%)`;
 
   return (
     <div className={`py-2 px-3 border-b border-gray-50 hover:bg-gray-50/50 ${isMonthlyOpen ? 'bg-blue-50/50' : ''}`}>
@@ -411,40 +444,29 @@ function CompactDriverRow({
         </button>
       </div>
 
-      <div className="flex items-center gap-1.5">
-        {driver.unit === 'currency' && <span className="text-gray-400 text-[10px]">$</span>}
-        <input
-          type="number"
-          value={driver.defaultValue}
-          onChange={e => onGlobalChange(parseFloat(e.target.value) || 0)}
-          className="input-field w-24 text-xs py-1"
-          step={driver.step}
-          min={driver.min}
-          max={driver.max}
-        />
-        {driver.unit === 'percent' && <span className="text-gray-400 text-[10px]">%</span>}
+      <div className="flex items-center gap-1">
+        {/* Tags — fixed width container, joined */}
+        <div className="flex shrink-0" style={{ width: '120px' }}>
+          <span className="flex-1 text-[8px] px-1.5 py-1.5 bg-gray-50 border border-gray-200 rounded-l tabular-nums whitespace-nowrap text-center" title="Past 6 month average">
+            <span className="text-gray-500">6M:</span> <span className="text-gray-800 font-bold">{unitLabel === '$' ? `$${(isInteger ? Math.round(trailingAvg) : Math.round(trailingAvg * 10) / 10)}` : `${(isInteger ? Math.round(trailingAvg) : Math.round(trailingAvg * 10) / 10)}${unitLabel}`}</span>
+          </span>
+          <span className="flex-1 text-[8px] px-1.5 py-1.5 bg-amber-50 border border-amber-200 border-l-0 rounded-r tabular-nums whitespace-nowrap text-center" title="Forward period average">
+            <span className="text-amber-800 font-bold">Fwd {unitLabel === '$' ? `$${forwardDisplay}` : `${forwardDisplay}${unitLabel}`}</span>
+          </span>
+        </div>
 
-        {/* % change label + delta slider stacked */}
-        <div className="flex-1 flex flex-col">
-          {/* % badge — centered above the track */}
+        {/* Gauge — takes all remaining space */}
+        <div className="flex-1 flex flex-col min-w-0">
           <div className="flex justify-center mb-0.5">
-            <span className={`text-[9px] font-bold tabular-nums leading-none ${pctColor}`}>
+            <span className={`text-[8px] font-bold tabular-nums leading-none ${pctColor}`}>
               {pctLabel}
             </span>
           </div>
-
-          {/* Track + thumb */}
-          <div className="relative h-4 flex items-center">
-            {/* Dynamic track: gray when at 0, colored fill from center to thumb */}
-            <div
-              className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
-              style={{ background: trackBg }}
-            />
-            {/* Center pin at 50% — marks the "no change" position */}
-            <div
-              className="absolute w-0.5 h-3 rounded-full bg-slate-400 pointer-events-none"
-              style={{ left: '50%', transform: 'translateX(-50%)' }}
-            />
+          <div className="relative h-5 flex items-center">
+            <div className="absolute inset-x-0 h-2 rounded-full pointer-events-none"
+              style={{ background: trackBg }} />
+            <div className="absolute w-0.5 h-3 rounded-full bg-slate-400 pointer-events-none"
+              style={{ left: `${zeroPct}%`, transform: 'translateX(-50%)' }} />
             <input
               type="range"
               value={sliderPct}
@@ -473,21 +495,20 @@ function MonthlyEditorPanel({
   onGlobalChange: (val: number) => void;
 }) {
   type HistWindow = '6' | '12' | 'all';
-  type ProjType = 'linear' | 'curve' | 'seasonal';
+  type ProjType = 'linear' | 'curve' | 'seasonal' | 'immediate';
+
+  const { driverProjTypes, setDriverProjType } = useAppStore();
+  const storedProjType = (driverProjTypes[driver.key] as ProjType | undefined) ?? 'seasonal';
 
   const [histWindow, setHistWindow] = useState<HistWindow>('12');
-  const [projType, setProjType] = useState<ProjType>('linear');
+  const [projType, setProjType] = useState<ProjType>(storedProjType);
   const [targetValue, setTargetValue] = useState<number>(driver.defaultValue);
 
   // Keep targetValue in sync with the top driver box (driver.defaultValue).
-  // Also re-run the projection so monthlyValues (which the forecast engine uses)
-  // stay in sync — otherwise changing the top-row slider has no visible effect
-  // because the forecast reads monthlyValues, not defaultValue.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Do NOT re-run projection here — the card slider already sets monthlyValues directly.
   useEffect(() => {
     setTargetValue(driver.defaultValue);
-    runProjection(projType, driver.defaultValue);
-  }, [driver.defaultValue]); // intentionally excludes projType/runProjection to fire only on external value changes
+  }, [driver.defaultValue]);
 
   const hasOverrides = Object.keys(driver.monthlyValues).length > 0;
   const unitLabel = driver.unit === 'percent' ? '%' : driver.unit === 'currency' ? '$' : '';
@@ -495,61 +516,142 @@ function MonthlyEditorPanel({
   const hasHistory = Object.keys(historyData).length > 0;
   const isInteger = (driver.step ?? 0.01) >= 1;
 
-  // When the user drags a dot or edits a cell manually, sync the gauge to the
-  // last forecast month value so the gauge always reflects "where the forecast ends up".
-  // This is display-only (setTargetValue only) — no projection re-run, no store write.
-  const lastForecastMonthKey = months[months.length - 1];
-  const lastForecastVal = lastForecastMonthKey !== undefined
-    ? (driver.monthlyValues[lastForecastMonthKey] ?? driver.defaultValue)
-    : undefined;
-  useEffect(() => {
-    if (lastForecastVal !== undefined) {
-      setTargetValue(lastForecastVal);
-    }
-  }, [lastForecastVal]);
+  // ── Trailing avg (last 6 historical months) = "where we were" ──
+  // Lock baseline at mount for drivers without history
+  const [panelBaseline] = useState(() => {
+    const hm = Object.keys(historyData).sort().slice(-6);
+    return hm.length > 0
+      ? hm.reduce((sum, m) => sum + (historyData[m] ?? 0), 0) / hm.length
+      : driver.defaultValue;
+  });
 
-  // Baseline for the gauge: last historical value (same as projection startVal)
-  const gaugeHistMonths = Object.keys(historyData).sort();
-  const gaugeLastHistKey = gaugeHistMonths[gaugeHistMonths.length - 1];
-  const gaugeOriginal = gaugeLastHistKey !== undefined && historyData[gaugeLastHistKey] !== undefined
-    ? historyData[gaugeLastHistKey]
-    : driver.defaultValue;
+  const allHistMonthsSorted = Object.keys(historyData).sort();
+  const trailing6 = allHistMonthsSorted.slice(-6);
+  const trailingAvg = trailing6.length > 0
+    ? trailing6.reduce((sum, m) => sum + (historyData[m] ?? 0), 0) / trailing6.length
+    : panelBaseline;
+  const trailingDisplay = isInteger ? Math.round(trailingAvg) : Math.round(trailingAvg * 10) / 10;
 
-  // Target gauge: % change of targetValue vs historical baseline
-  // Symmetric ±100 range so 0% is always visually at the exact center (50%)
-  const GAUGE_MIN = -100;
-  const GAUGE_MAX = 100;
-  const centerTrackPct = 50; // always at 50% since range is symmetric
-  const tgtPct = gaugeOriginal !== 0
-    ? ((targetValue - gaugeOriginal) / Math.abs(gaugeOriginal)) * 100
-    : 0;
-  const tgtTrackPct = Math.max(0, Math.min(100,
-    ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
-  ));
-  const tgtPctLabel = Math.abs(tgtPct) < 0.05 ? '0%' : `${tgtPct > 0 ? '+' : ''}${tgtPct.toFixed(1)}%`;
-  const tgtPctColor = tgtPct > 0.05 ? 'text-emerald-600' : tgtPct < -0.05 ? 'text-red-500' : 'text-gray-400';
-  const tgtTrackBg = Math.abs(tgtPct) < 0.05
-    ? '#d1d5db'
-    : tgtPct > 0
-      ? `linear-gradient(to right,#d1d5db 0%,#d1d5db ${centerTrackPct}%,#22c55e ${centerTrackPct}%,#16a34a ${tgtTrackPct}%,#d1d5db ${tgtTrackPct}%,#d1d5db 100%)`
-      : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${tgtTrackPct}%,#dc2626 ${tgtTrackPct}%,#fca5a5 ${centerTrackPct}%,#d1d5db ${centerTrackPct}%,#d1d5db 100%)`;
-  const handleTargetGauge = (sliderVal: number) => {
-    const rawTarget = gaugeOriginal * (1 + sliderVal / 100);
-    const step = driver.step ?? 1;
-    const snapped = step >= 1 ? Math.round(rawTarget) : parseFloat(rawTarget.toFixed(1));
-    const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
-    setTargetValue(clamped);
-    onGlobalChange(clamped);   // ← keeps top number input in sync
-    runProjection(projType, clamped);
-  };
-
+  // Effective monthly values: use trailingAvg as fallback when no overrides
+  // so that untouched params show 0% change (forward avg = trailing avg)
   const effectiveMonthlyValues = useMemo(() => {
+    const fallback = trailingAvg;
     const result: Record<string, number> = {};
     months.forEach(m => {
-      result[m] = driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : driver.defaultValue;
+      result[m] = driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : fallback;
     });
     return result;
-  }, [driver.defaultValue, driver.monthlyValues, months]);
+  }, [driver.monthlyValues, months, trailingAvg]);
+
+  // ── Forward avg (all forecast months) = "where we're heading" ──
+  const allForecastVals = Object.values(effectiveMonthlyValues);
+  const forwardAvg = allForecastVals.length > 0
+    ? allForecastVals.reduce((a, b) => a + b, 0) / allForecastVals.length
+    : driver.defaultValue;
+  const forwardDisplay = isInteger ? Math.round(forwardAvg) : Math.round(forwardAvg * 10) / 10;
+
+  // ── Gauge: forward avg vs trailing avg ──
+  const GAUGE_MIN = -500;
+  const GAUGE_MAX = 500;
+  const centerTrackPct = ((0 - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100;
+  const gaugePct = trailingAvg !== 0
+    ? ((forwardAvg - trailingAvg) / Math.abs(trailingAvg)) * 100
+    : 0;
+  const gaugeTrackPos = Math.max(0, Math.min(100,
+    ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gaugePct)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
+  ));
+  const gaugePctLabel = Math.abs(gaugePct) < 0.05 ? '0%' : `${gaugePct > 0 ? '+' : ''}${gaugePct.toFixed(1)}%`;
+  const gaugePctColor = gaugePct > 0.05 ? 'text-emerald-600' : gaugePct < -0.05 ? 'text-red-500' : 'text-gray-400';
+  const gaugeTrackBg = Math.abs(gaugePct) < 0.05
+    ? '#d1d5db'
+    : gaugePct > 0
+      ? `linear-gradient(to right,#d1d5db 0%,#d1d5db ${centerTrackPct}%,#22c55e ${centerTrackPct}%,#16a34a ${gaugeTrackPos}%,#d1d5db ${gaugeTrackPos}%,#d1d5db 100%)`
+      : `linear-gradient(to right,#d1d5db 0%,#d1d5db ${gaugeTrackPos}%,#dc2626 ${gaugeTrackPos}%,#fca5a5 ${centerTrackPct}%,#d1d5db ${centerTrackPct}%,#d1d5db 100%)`;
+
+  // Gauge drag → find endpoint so that projection avg ≈ desired forward avg.
+  // Uses binary search: run projection trial, compute avg, adjust endpoint.
+  const handleTargetGauge = (sliderVal: number) => {
+    const desiredAvg = trailingAvg * (1 + sliderVal / 100);
+    const step = driver.step ?? 1;
+    const dMin = driver.min ?? 0;
+    const dMax = driver.max ?? Infinity;
+
+    // Helper: simulate projection for a given endpoint and return avg
+    const lastHKey = allHistMonthsSorted[allHistMonthsSorted.length - 1];
+    const startVal = lastHKey !== undefined && historyData[lastHKey] !== undefined
+      ? historyData[lastHKey] : driver.defaultValue;
+    const n = months.length;
+
+    const computeProjectionAvg = (endVal: number): number => {
+      if (n === 0) return endVal;
+      let sum = 0;
+      if (projType === 'immediate') {
+        return endVal;
+      } else if (projType === 'linear') {
+        for (let i = 0; i < n; i++) {
+          const t = n > 1 ? i / (n - 1) : 1;
+          sum += startVal + (endVal - startVal) * t;
+        }
+      } else if (projType === 'curve') {
+        for (let i = 0; i < n; i++) {
+          const t = n > 1 ? i / (n - 1) : 1;
+          sum += startVal + (endVal - startVal) * t * t;
+        }
+      } else {
+        // seasonal: linear + seasonal offsets (same logic as runProjection)
+        const allHistVals = Object.values(historyData);
+        const overallAvg = allHistVals.length > 0 ? allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length : startVal;
+        const byMoY: Record<number, number[]> = {};
+        Object.entries(historyData).forEach(([month, val]) => {
+          const moy = parseInt(month.split('-')[1]) - 1;
+          if (!byMoY[moy]) byMoY[moy] = [];
+          byMoY[moy].push(val);
+        });
+        const seasonalAdj: Record<number, number> = {};
+        for (let i = 0; i < 12; i++) {
+          seasonalAdj[i] = byMoY[i] ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg : 0;
+        }
+        const raw: number[] = [];
+        for (let i = 0; i < n; i++) {
+          const t = n > 1 ? i / (n - 1) : 1;
+          const base = startVal + (endVal - startVal) * t;
+          const moy = parseInt(months[i].split('-')[1]) - 1;
+          raw.push(base + (seasonalAdj[moy] ?? 0));
+        }
+        const endOffset = endVal - raw[raw.length - 1];
+        for (let i = 0; i < n; i++) sum += raw[i] + endOffset;
+      }
+      return sum / n;
+    };
+
+    // For immediate, endpoint = desiredAvg
+    if (projType === 'immediate') {
+      const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
+      const clamped = Math.max(dMin, Math.min(dMax, snapped));
+      setTargetValue(clamped);
+      onGlobalChange(clamped);
+      runProjection(projType, clamped);
+      return;
+    }
+
+    // Binary search for endpoint — allow negative to find true minimum,
+    // clamp result to driver min/max after
+    let lo = -(Math.abs(startVal) * 12 + 10000);
+    let hi = Math.abs(startVal) * 12 + 10000;
+    for (let iter = 0; iter < 60; iter++) {
+      const mid = (lo + hi) / 2;
+      const avg = computeProjectionAvg(mid);
+      if (Math.abs(avg - desiredAvg) < 0.5) break;
+      if (avg < desiredAvg) lo = mid;
+      else hi = mid;
+    }
+    const endpoint = (lo + hi) / 2;
+    const snapped = step >= 1 ? Math.round(endpoint) : parseFloat(endpoint.toFixed(1));
+    // Don't clamp endpoint — let projection produce values that get clamped per-month
+    setTargetValue(snapped);
+    onGlobalChange(Math.max(dMin, Math.min(dMax, snapped)));
+    runProjection(projType, snapped);
+  };
 
   const chartData = useMemo(() => {
     const allHistMonths = Object.keys(historyData).sort();
@@ -566,15 +668,19 @@ function MonthlyEditorPanel({
       monthKey: null as string | null,
       historical: historyData[m],
       forecast: m === lastHistMonth ? (historyData[m] ?? null) : null,
+      avg: null as number | null,
     }));
 
     // Forecast points start from the month AFTER the last historical month.
     // No bridge needed here — the bridge is already in histPoints above.
+    const fVals = months.map(m => effectiveMonthlyValues[m]);
+    const fAvg = fVals.length > 0 ? fVals.reduce((a, b) => a + b, 0) / fVals.length : null;
     const forecastPoints = months.map(m => ({
       month: formatMonthLabel(m),
       monthKey: m,
       historical: null as number | null,
       forecast: effectiveMonthlyValues[m],
+      avg: fAvg,
     }));
 
     return [...histPoints, ...forecastPoints];
@@ -635,7 +741,9 @@ function MonthlyEditorPanel({
     // (prevents intermediate renders showing driver.defaultValue for un-written months)
     let newValues: Record<string, number> = {};
 
-    if (type === 'linear') {
+    if (type === 'immediate') {
+      months.forEach(m => { newValues[m] = round(endVal); });
+    } else if (type === 'linear') {
       months.forEach((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
         newValues[m] = round(startVal + (endVal - startVal) * t);
@@ -677,23 +785,22 @@ function MonthlyEditorPanel({
         months.forEach((m, i) => { newValues[m] = round(raw[i] + endOffset); });
       }
     }
+    // Clamp values to driver min/max
+    const dMin = driver.min ?? -Infinity;
+    const dMax = driver.max ?? Infinity;
+    for (const m of Object.keys(newValues)) {
+      newValues[m] = Math.max(dMin, Math.min(dMax, newValues[m]));
+    }
     // Single atomic write → one simulation run → no flickering intermediate state
     onBatchMonthChange(newValues);
-  }, [months, driver.defaultValue, driver.step, historyData, round, onBatchMonthChange]);
+  }, [months, driver.defaultValue, driver.min, driver.max, driver.step, historyData, round, onBatchMonthChange]);
 
-  // Auto-run projection when the panel first opens (no overrides yet)
-  // so months immediately ramp from the last historical value to the target,
-  // instead of staying flat at driver.defaultValue.
-  useEffect(() => {
-    if (Object.keys(driver.monthlyValues).length === 0) {
-      runProjection('linear', targetValue);
-    }
-    // intentionally runs once on mount only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // No auto-run on mount — opening the panel should NOT change any values.
+  // Projection only runs when the user explicitly changes target, gauge, or projection type.
 
   const handleProjTypeChange = (type: ProjType) => {
     setProjType(type);
+    setDriverProjType(driver.key, type);
     runProjection(type, targetValue);
   };
 
@@ -785,6 +892,7 @@ function MonthlyEditorPanel({
           <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
             <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
             <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-6 border-t border-dashed border-amber-500" /> Fwd Avg ({unitLabel === '$' ? `$${forwardDisplay}` : `${forwardDisplay}${unitLabel}`})</span>
             <span className="ml-auto flex items-center gap-1 text-purple-400 italic">drag dots ↕</span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
@@ -800,6 +908,15 @@ function MonthlyEditorPanel({
                 <ReferenceLine x={refLineLabel} stroke="#cbd5e1" strokeDasharray="4 2"
                   label={{ value: 'Now', position: 'top', fontSize: 9, fill: '#94a3b8' }} />
               )}
+              {/* Average reference line across forecast period */}
+              {/* Forward average line */}
+              <ReferenceLine y={forwardAvg} stroke="#f59e0b" strokeDasharray="6 3" strokeWidth={1.5}
+                label={{ value: `Fwd: ${isInteger ? Math.round(forwardAvg) : forwardAvg.toFixed(1)}`, position: 'right', fontSize: 9, fill: '#d97706' }}
+                ifOverflow="extendDomain" />
+              {/* Trailing 6M average line */}
+              <ReferenceLine y={trailingAvg} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth={1}
+                label={{ value: `6M: ${isInteger ? Math.round(trailingAvg) : trailingAvg.toFixed(1)}`, position: 'left', fontSize: 9, fill: '#64748b' }}
+                ifOverflow="extendDomain" />
               <Line type="monotone" dataKey="historical" stroke="#3b82f6" strokeWidth={2}
                 dot={{ r: 2, fill: '#3b82f6' }} connectNulls={false} isAnimationActive={false} name="Historical" />
               <Line type="monotone" dataKey="forecast" stroke="#8b5cf6" strokeWidth={2}
@@ -812,31 +929,35 @@ function MonthlyEditorPanel({
 
       {/* Projection Controls */}
       <div className="flex items-center gap-2 mb-4 p-3 bg-white rounded-lg border border-gray-100">
-        <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Target:</span>
-        {unitLabel === '$' && <span className="text-gray-400 text-xs">$</span>}
-        <input
-          type="number"
-          value={targetValue}
-          onChange={e => { const v = parseFloat(e.target.value) || 0; setTargetValue(v); onGlobalChange(v); runProjection(projType, v); }}
-          className="input-field w-24 text-xs py-1 text-center"
-          step={driver.step}
-        />
-        {unitLabel === '%' && <span className="text-gray-400 text-xs">%</span>}
+        {/* Trailing 6M avg (read-only) */}
+        <div className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-50 rounded-md border border-gray-200">
+          <span className="text-[11px] text-gray-500 font-medium whitespace-nowrap">Past 6M:</span>
+          <span className="text-xs text-gray-700 font-bold tabular-nums">
+            {unitLabel === '$' ? `$${trailingDisplay}` : `${trailingDisplay}${unitLabel}`}
+          </span>
+        </div>
 
-        {/* Target gauge — % vs historical baseline, auto-reruns projection */}
+        {/* Forward avg (read-only, updates as user changes monthly values) */}
+        <div className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 rounded-md border border-amber-200">
+          <span className="text-[11px] text-amber-700 font-medium whitespace-nowrap">Fwd Avg:</span>
+          <span className="text-xs text-amber-800 font-bold tabular-nums">
+            {unitLabel === '$' ? `$${forwardDisplay}` : `${forwardDisplay}${unitLabel}`}
+          </span>
+        </div>
+
+        {/* Gauge: forward avg vs trailing avg */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex justify-center mb-0.5">
-            <span className={`text-[9px] font-bold tabular-nums ${tgtPctColor}`}>{tgtPctLabel}</span>
+            <span className={`text-[9px] font-bold tabular-nums ${gaugePctColor}`}>{gaugePctLabel}</span>
           </div>
           <div className="relative h-3.5 flex items-center">
             <div className="absolute inset-x-0 h-1.5 rounded-full pointer-events-none"
-              style={{ background: tgtTrackBg }} />
-            {/* Center marker at 0% change */}
+              style={{ background: gaugeTrackBg }} />
             <div className="absolute w-0.5 h-2.5 rounded-full bg-slate-400 pointer-events-none"
               style={{ left: `${centerTrackPct}%`, transform: 'translateX(-50%)' }} />
             <input
               type="range"
-              value={Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, tgtPct))}
+              value={Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gaugePct))}
               min={GAUGE_MIN} max={GAUGE_MAX} step={isInteger ? 1 : 0.1}
               onChange={e => handleTargetGauge(parseFloat(e.target.value))}
               className="delta-slider"
@@ -850,6 +971,7 @@ function MonthlyEditorPanel({
           <option value="linear">Linear</option>
           <option value="curve">Curve</option>
           <option value="seasonal">Trend Learning</option>
+          <option value="immediate">Immediate</option>
         </select>
       </div>
 
