@@ -19,7 +19,7 @@ export default function Layout() {
       <aside className="w-60 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-5 border-b border-slate-700">
           <div className="flex items-center gap-2.5">
-            <img src="/favicon.svg" alt="Notify Me" className="w-8 h-8 rounded-lg" />
+            <img src="/logo.png" alt="Notify Me" className="w-8 h-8 rounded-lg" />
             <div>
               <h1 className="text-sm font-bold leading-tight">Notify Me</h1>
               <p className="text-[11px] text-slate-400">Target Page</p>

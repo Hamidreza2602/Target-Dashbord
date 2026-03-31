@@ -26,7 +26,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <img src="/favicon.svg" alt="Notify Me" className="w-14 h-14 rounded-2xl mx-auto mb-4" />
+          <img src="/logo.png" alt="Notify Me" className="w-14 h-14 rounded-2xl mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-white">Notify Me</h1>
           <p className="text-slate-400 text-sm mt-1">Target Page</p>
         </div>
