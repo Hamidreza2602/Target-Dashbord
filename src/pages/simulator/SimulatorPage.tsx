@@ -390,14 +390,28 @@ function CompactDriverRow({
   const forwardDisplay = isInteger ? Math.round(forwardAvg) : Math.round(forwardAvg * 10) / 10;
 
   // Gauge: forward avg vs trailing 6M avg
+  // Exponential mapping: center = precise, edges = fast
   const SLIDER_MIN = -500;
   const SLIDER_MAX = 500;
+  const GAUGE_POWER = 2.5; // higher = more exponential
+  const GAUGE_RANGE = 500;
+
+  // Convert actual % → slider position (inverse power curve)
+  const pctToSlider = (pct: number) => {
+    const sign = pct >= 0 ? 1 : -1;
+    return sign * Math.pow(Math.abs(pct) / GAUGE_RANGE, 1 / GAUGE_POWER) * GAUGE_RANGE;
+  };
+  // Convert slider position → actual % (power curve)
+  const sliderToPct = (s: number) => {
+    const sign = s >= 0 ? 1 : -1;
+    return sign * Math.pow(Math.abs(s) / GAUGE_RANGE, GAUGE_POWER) * GAUGE_RANGE;
+  };
 
   const pctChange = trailingAvg !== 0
     ? ((forwardAvg - trailingAvg) / Math.abs(trailingAvg)) * 100
     : 0;
-  // Clamp to slider range for the thumb position
-  const sliderPct = Math.max(SLIDER_MIN, Math.min(SLIDER_MAX, pctChange));
+  // Map actual % to slider position via inverse power curve
+  const sliderPct = Math.max(SLIDER_MIN, Math.min(SLIDER_MAX, pctToSlider(pctChange)));
 
   const pctLabel = Math.abs(pctChange) < 0.05
     ? '0%'
@@ -408,8 +422,9 @@ function CompactDriverRow({
       ? 'text-red-500'
       : 'text-gray-400';
 
-  // Slider → set all months uniformly so forward avg matches desired %
-  const handleSliderChange = (pct: number) => {
+  // Slider → map through power curve → set months
+  const handleSliderChange = (rawSlider: number) => {
+    const pct = sliderToPct(rawSlider);
     const desiredAvg = trailingAvg * (1 + pct / 100);
     const step = driver.step ?? 1;
     const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
@@ -550,15 +565,27 @@ function MonthlyEditorPanel({
     : driver.defaultValue;
   const forwardDisplay = isInteger ? Math.round(forwardAvg) : Math.round(forwardAvg * 10) / 10;
 
-  // ── Gauge: forward avg vs trailing avg ──
+  // ── Gauge: forward avg vs trailing avg (exponential mapping) ──
   const GAUGE_MIN = -500;
   const GAUGE_MAX = 500;
-  const centerTrackPct = ((0 - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100;
+  const G_POWER = 2.5;
+  const G_RANGE = 500;
+  const gPctToSlider = (pct: number) => {
+    const sign = pct >= 0 ? 1 : -1;
+    return sign * Math.pow(Math.abs(pct) / G_RANGE, 1 / G_POWER) * G_RANGE;
+  };
+  const gSliderToPct = (s: number) => {
+    const sign = s >= 0 ? 1 : -1;
+    return sign * Math.pow(Math.abs(s) / G_RANGE, G_POWER) * G_RANGE;
+  };
+
   const gaugePct = trailingAvg !== 0
     ? ((forwardAvg - trailingAvg) / Math.abs(trailingAvg)) * 100
     : 0;
+  const gaugeSliderVal = Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gPctToSlider(gaugePct)));
+  const centerTrackPct = ((0 - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100;
   const gaugeTrackPos = Math.max(0, Math.min(100,
-    ((Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gaugePct)) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
+    ((gaugeSliderVal - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100
   ));
   const gaugePctLabel = Math.abs(gaugePct) < 0.05 ? '0%' : `${gaugePct > 0 ? '+' : ''}${gaugePct.toFixed(1)}%`;
   const gaugePctColor = gaugePct > 0.05 ? 'text-emerald-600' : gaugePct < -0.05 ? 'text-red-500' : 'text-gray-400';
@@ -570,7 +597,8 @@ function MonthlyEditorPanel({
 
   // Gauge drag → find endpoint so that projection avg ≈ desired forward avg.
   // Uses binary search: run projection trial, compute avg, adjust endpoint.
-  const handleTargetGauge = (sliderVal: number) => {
+  const handleTargetGauge = (rawSlider: number) => {
+    const sliderVal = gSliderToPct(rawSlider);
     const desiredAvg = trailingAvg * (1 + sliderVal / 100);
     const step = driver.step ?? 1;
     const dMin = driver.min ?? 0;
@@ -957,7 +985,7 @@ function MonthlyEditorPanel({
               style={{ left: `${centerTrackPct}%`, transform: 'translateX(-50%)' }} />
             <input
               type="range"
-              value={Math.max(GAUGE_MIN, Math.min(GAUGE_MAX, gaugePct))}
+              value={gaugeSliderVal}
               min={GAUGE_MIN} max={GAUGE_MAX} step={isInteger ? 1 : 0.1}
               onChange={e => handleTargetGauge(parseFloat(e.target.value))}
               className="delta-slider"
