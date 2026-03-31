@@ -635,9 +635,8 @@ export const useAppStore = create<AppState>()(
   },
   {
     name: 'saas-revenue-store',
-    // Only persist data state, not computed forecasts (those are re-derived)
+    // Persist shared data — NOT currentUser (each session manages its own login)
     partialize: (state) => ({
-      currentUser: state.currentUser,
       scenarios: state.scenarios,
       activeScenarioId: state.activeScenarioId,
       drivers: state.drivers,
