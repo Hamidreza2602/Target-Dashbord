@@ -7,7 +7,23 @@ import { SIMULATOR_DRIVER_MAPPING } from '../data/metricDefinitions';
 import { addMonths, format } from 'date-fns';
 import { DRIVER_HISTORY } from '../data/driverHistory';
 
+export type UserRole = 'admin' | 'member';
+export interface CurrentUser {
+  name: string;
+  role: UserRole;
+}
+
+const USERS: Record<string, { password: string; role: UserRole; name: string }> = {
+  admin: { password: 'admin123', role: 'admin', name: 'Admin' },
+  member: { password: 'member123', role: 'member', name: 'Team Member' },
+};
+
 interface AppState {
+  // Auth
+  currentUser: CurrentUser | null;
+  login: (username: string, password: string) => boolean;
+  logout: () => void;
+
   // App
   app: typeof mockApp;
 
@@ -89,6 +105,18 @@ export const useAppStore = create<AppState>((set, get) => {
   });
 
   return {
+    // Auth
+    currentUser: null,
+    login: (username, password) => {
+      const user = USERS[username];
+      if (user && user.password === password) {
+        set({ currentUser: { name: user.name, role: user.role } });
+        return true;
+      }
+      return false;
+    },
+    logout: () => set({ currentUser: null }),
+
     app: mockApp,
     baselines: [mockBaseline],
     activeBaselineId: mockBaseline.id,

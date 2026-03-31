@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Zap } from 'lucide-react';
 
 const PATH_TYPE_LABELS = { linear: 'Linear', front_loaded: 'Front-loaded', back_loaded: 'Back-loaded', immediate: 'Immediate' } as const;
 
-export default function TargetEditTab({ version }: { version: TargetVersion }) {
+export default function TargetEditTab({ version, isAdmin = true }: { version: TargetVersion; isAdmin?: boolean }) {
   const { regenerateTargetPath, updateMetricTargets } = useAppStore();
   const [expandedObj, setExpandedObj] = useState<Set<string>>(new Set(version.objectives.map(o => o.id)));
   const [expandedMetric, setExpandedMetric] = useState<string | null>(null);
@@ -65,6 +65,7 @@ export default function TargetEditTab({ version }: { version: TargetVersion }) {
                         versionId={version.id}
                         isExpanded={expandedMetric === m.id}
                         onToggle={() => setExpandedMetric(expandedMetric === m.id ? null : m.id)}
+                        isAdmin={isAdmin}
                       />
                     ))}
                   </tbody>
@@ -79,11 +80,12 @@ export default function TargetEditTab({ version }: { version: TargetVersion }) {
   );
 }
 
-function MetricRow({ metric, versionId, isExpanded, onToggle }: {
+function MetricRow({ metric, versionId, isExpanded, onToggle, isAdmin = true }: {
   metric: TargetMetric;
   versionId: string;
   isExpanded: boolean;
   onToggle: () => void;
+  isAdmin?: boolean;
 }) {
   const { regenerateTargetPath, updateMetricTargets, updateTargetPeriodValue } = useAppStore();
   const [editBaseline, setEditBaseline] = useState(metric.baselineValue.toString());
@@ -111,7 +113,8 @@ function MetricRow({ metric, versionId, isExpanded, onToggle }: {
         <td className="px-4 py-2.5 text-right">
           <input
             type="number"
-            className="w-20 text-right text-sm border border-gray-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+            disabled={!isAdmin}
+            className={`w-20 text-right text-sm border border-gray-200 rounded px-2 py-1 ${isAdmin ? 'focus:ring-1 focus:ring-blue-400 focus:border-blue-400' : 'bg-gray-50 text-gray-400'}`}
             value={editBaseline}
             onChange={e => setEditBaseline(e.target.value)}
             onBlur={commitValues}
@@ -121,7 +124,8 @@ function MetricRow({ metric, versionId, isExpanded, onToggle }: {
         <td className="px-4 py-2.5 text-right">
           <input
             type="number"
-            className="w-20 text-right text-sm border border-gray-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+            disabled={!isAdmin}
+            className={`w-20 text-right text-sm border border-gray-200 rounded px-2 py-1 ${isAdmin ? 'focus:ring-1 focus:ring-blue-400 focus:border-blue-400' : 'bg-gray-50 text-gray-400'}`}
             value={editTarget}
             onChange={e => setEditTarget(e.target.value)}
             onBlur={commitValues}
@@ -130,7 +134,8 @@ function MetricRow({ metric, versionId, isExpanded, onToggle }: {
         </td>
         <td className="px-4 py-2.5 text-center">
           <select
-            className="text-xs border border-gray-200 rounded px-2 py-1 bg-white"
+            disabled={!isAdmin}
+            className={`text-xs border border-gray-200 rounded px-2 py-1 ${isAdmin ? 'bg-white' : 'bg-gray-50 text-gray-400'}`}
             value={metric.targetPathType}
             onChange={e => regenerateTargetPath(versionId, metric.id, e.target.value as any)}
           >
@@ -161,7 +166,8 @@ function MetricRow({ metric, versionId, isExpanded, onToggle }: {
                   <div className="text-[10px] text-gray-400 mb-1">{p.periodMonth.substring(5)}</div>
                   <input
                     type="number"
-                    className="w-16 text-center text-xs border border-gray-200 rounded px-1 py-1"
+                    disabled={!isAdmin}
+                    className={`w-16 text-center text-xs border border-gray-200 rounded px-1 py-1 ${!isAdmin ? 'bg-gray-50 text-gray-400' : ''}`}
                     value={p.targetValue}
                     onChange={e => {
                       const v = parseFloat(e.target.value);

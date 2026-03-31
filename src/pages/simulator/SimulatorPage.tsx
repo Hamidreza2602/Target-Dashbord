@@ -29,7 +29,9 @@ export default function SimulatorPage() {
     updateDriver, updateDriverMonth, batchUpdateDriverMonths, resetAllDrivers,
     resetDriverMonth, setForecastDates, runSimulation,
     scenarios, activeScenarioId, saveScenario, duplicateScenario, createTargetFromScenario,
+    currentUser,
   } = useAppStore();
+  const isAdmin = currentUser?.role === 'admin';
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showTargetModal, setShowTargetModal] = useState(false);
@@ -95,9 +97,11 @@ export default function SimulatorPage() {
           <button onClick={() => exportToCSV(forecastToCSVData(forecastMonths), 'forecast.csv')} className="btn-secondary flex items-center gap-1.5">
             <Download size={15} /> CSV
           </button>
-          <button onClick={() => setShowTargetModal(true)} className="btn-primary flex items-center gap-1.5">
-            <Target size={15} /> Convert to Target
-          </button>
+          {isAdmin && (
+            <button onClick={() => setShowTargetModal(true)} className="btn-primary flex items-center gap-1.5">
+              <Target size={15} /> Convert to Target
+            </button>
+          )}
         </div>
       </div>
 

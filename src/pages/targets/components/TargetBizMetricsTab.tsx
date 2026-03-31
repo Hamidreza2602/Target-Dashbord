@@ -35,7 +35,7 @@ const statusColors: Record<MetricStatus, string> = {
 };
 const statusLabels: Record<MetricStatus, string> = { ahead: 'Ahead', on_track: 'On Track', behind: 'Behind' };
 
-export default function TargetBizMetricsTab({ version }: { version: TargetVersion }) {
+export default function TargetBizMetricsTab({ version, isAdmin = true }: { version: TargetVersion; isAdmin?: boolean }) {
   const { updateActualValue, forecastMonths } = useAppStore();
   const bizObj = version.objectives.find(o => o.id === BIZ_OBJ_ID);
   const bizMetrics = version.metrics.filter(m => m.objectiveId === BIZ_OBJ_ID);
@@ -398,9 +398,9 @@ export default function TargetBizMetricsTab({ version }: { version: TargetVersio
                           <div className="flex flex-col items-center gap-0.5">
                             <input
                               type="number"
-                              disabled={!isPast}
+                              disabled={!isPast || !isAdmin}
                               className={`w-20 text-center text-xs border rounded px-1 py-0.5
-                                ${!isPast ? 'bg-gray-50 text-gray-300 border-gray-100' :
+                                ${(!isPast || !isAdmin) ? 'bg-gray-50 text-gray-300 border-gray-100' :
                                   isBad ? 'border-red-300 bg-red-50 text-red-700' :
                                   isGood ? 'border-emerald-300 bg-emerald-50 text-emerald-700' :
                                   'border-gray-200'}`}

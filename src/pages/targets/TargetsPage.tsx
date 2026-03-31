@@ -9,7 +9,8 @@ import TargetBizMetricsTab from './components/TargetBizMetricsTab';
 import CreateTargetModal from './components/CreateTargetModal';
 
 export default function TargetsPage() {
-  const { targetPlans, targetVersions, archiveTarget, activateTargetVersion, reviseTarget, syncTargetsToSimulator } = useAppStore();
+  const { targetPlans, targetVersions, archiveTarget, activateTargetVersion, reviseTarget, syncTargetsToSimulator, currentUser } = useAppStore();
+  const isAdmin = currentUser?.role === 'admin';
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(targetPlans[0]?.id || null);
   const [activeTab, setActiveTab] = useState<'biz' | 'edit' | 'actuals' | 'report'>('biz');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -40,9 +41,11 @@ export default function TargetsPage() {
           <h1 className="text-2xl font-bold text-gray-900">OKR Targets</h1>
           <p className="text-sm text-gray-500 mt-1">Set objectives, track key results, enter actuals</p>
         </div>
-        <button onClick={() => setShowCreateModal(true)} className="btn-primary flex items-center gap-1.5">
-          <Plus size={15} /> New Target
-        </button>
+        {isAdmin && (
+          <button onClick={() => setShowCreateModal(true)} className="btn-primary flex items-center gap-1.5">
+            <Plus size={15} /> New Target
+          </button>
+        )}
       </div>
 
       <div className="flex gap-6">
@@ -110,17 +113,21 @@ export default function TargetsPage() {
                   <button onClick={() => setShowVersionHistory(true)} className="btn-secondary flex items-center gap-1 text-xs">
                     <History size={13} /> History
                   </button>
-                  <button onClick={() => { setReviseNote(''); setShowReviseModal(true); }} className="btn-secondary flex items-center gap-1 text-xs">
-                    <Edit3 size={13} /> Revise
-                  </button>
-                  {selectedPlan.status !== 'active' && (
-                    <button onClick={() => activateTargetVersion(selectedPlan.id, activeVersion.id)} className="btn-primary text-xs">
-                      Activate
-                    </button>
+                  {isAdmin && (
+                    <>
+                      <button onClick={() => { setReviseNote(''); setShowReviseModal(true); }} className="btn-secondary flex items-center gap-1 text-xs">
+                        <Edit3 size={13} /> Revise
+                      </button>
+                      {selectedPlan.status !== 'active' && (
+                        <button onClick={() => activateTargetVersion(selectedPlan.id, activeVersion.id)} className="btn-primary text-xs">
+                          Activate
+                        </button>
+                      )}
+                      <button onClick={() => archiveTarget(selectedPlan.id)} className="btn-secondary text-xs text-red-600 border-red-200 hover:bg-red-50">
+                        <Archive size={13} />
+                      </button>
+                    </>
                   )}
-                  <button onClick={() => archiveTarget(selectedPlan.id)} className="btn-secondary text-xs text-red-600 border-red-200 hover:bg-red-50">
-                    <Archive size={13} />
-                  </button>
                 </div>
               </div>
 
@@ -138,9 +145,9 @@ export default function TargetsPage() {
               </div>
             </div>
 
-            {activeTab === 'biz' && <TargetBizMetricsTab version={activeVersion} />}
-            {activeTab === 'edit' && <TargetEditTab version={activeVersion} />}
-            {activeTab === 'actuals' && <TargetActualsTab version={activeVersion} />}
+            {activeTab === 'biz' && <TargetBizMetricsTab version={activeVersion} isAdmin={isAdmin} />}
+            {activeTab === 'edit' && <TargetEditTab version={activeVersion} isAdmin={isAdmin} />}
+            {activeTab === 'actuals' && <TargetActualsTab version={activeVersion} isAdmin={isAdmin} />}
             {activeTab === 'report' && <TargetReportTab version={activeVersion} />}
           </div>
         ) : (

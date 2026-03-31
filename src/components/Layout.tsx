@@ -1,14 +1,18 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { BarChart3, Target, FileText, Settings, TrendingUp } from 'lucide-react';
-
-const navItems = [
-  { to: '/simulator', label: 'Simulator', icon: TrendingUp },
-  { to: '/targets', label: 'Targets', icon: Target },
-  { to: '/reports', label: 'Reports', icon: BarChart3 },
-  { to: '/admin', label: 'Admin', icon: Settings },
-];
+import { BarChart3, Target, FileText, Settings, TrendingUp, LogOut } from 'lucide-react';
+import { useAppStore } from '../store/appStore';
 
 export default function Layout() {
+  const { currentUser, logout } = useAppStore();
+  const isAdmin = currentUser?.role === 'admin';
+
+  const navItems = [
+    { to: '/simulator', label: 'Simulator', icon: TrendingUp, show: true },
+    { to: '/targets', label: 'Targets', icon: Target, show: true },
+    { to: '/reports', label: 'Reports', icon: BarChart3, show: true },
+    { to: '/admin', label: 'Admin', icon: Settings, show: isAdmin },
+  ];
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -26,7 +30,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 py-4">
-          {navItems.map(item => (
+          {navItems.filter(i => i.show).map(item => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -44,10 +48,24 @@ export default function Layout() {
           ))}
         </nav>
 
+        {/* User info + logout */}
         <div className="p-4 border-t border-slate-700">
-          <div className="text-xs text-slate-500">
-            <p>ShopFlow Pro</p>
-            <p className="mt-0.5">Mock Data Mode</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-white font-medium">{currentUser?.name}</p>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                isAdmin ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-700 text-slate-400'
+              }`}>
+                {isAdmin ? 'Admin' : 'Member'}
+              </span>
+            </div>
+            <button
+              onClick={logout}
+              className="text-slate-500 hover:text-white transition-colors p-1.5 rounded hover:bg-slate-800"
+              title="Logout"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>

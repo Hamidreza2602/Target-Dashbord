@@ -2,7 +2,7 @@ import { useAppStore } from '../../../store/appStore';
 import { TargetVersion } from '../../../types';
 import { format } from 'date-fns';
 
-export default function TargetActualsTab({ version }: { version: TargetVersion }) {
+export default function TargetActualsTab({ version, isAdmin = true }: { version: TargetVersion; isAdmin?: boolean }) {
   const { updateActualValue } = useAppStore();
   const now = format(new Date(), 'yyyy-MM');
 
@@ -62,9 +62,9 @@ export default function TargetActualsTab({ version }: { version: TargetVersion }
                               <div className="flex flex-col items-center gap-0.5">
                                 <input
                                   type="number"
-                                  disabled={!isPast}
+                                  disabled={!isPast || !isAdmin}
                                   className={`w-20 text-center text-xs border rounded px-1.5 py-1
-                                    ${!isPast ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed' :
+                                    ${(!isPast || !isAdmin) ? 'bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed' :
                                       isBad ? 'border-red-300 bg-red-50 text-red-700' :
                                       isGood ? 'border-emerald-300 bg-emerald-50 text-emerald-700' :
                                       'border-gray-200'}
