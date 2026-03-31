@@ -7,8 +7,8 @@ export default function Layout() {
   const isAdmin = currentUser?.role === 'admin';
 
   const navItems = [
-    { to: '/simulator', label: 'Simulator', icon: TrendingUp, show: true },
     { to: '/targets', label: 'Targets', icon: Target, show: true },
+    { to: '/simulator', label: 'Simulator', icon: TrendingUp, show: true },
     { to: '/reports', label: 'Reports', icon: BarChart3, show: true },
     { to: '/admin', label: 'Admin', icon: Settings, show: isAdmin },
   ];
@@ -19,12 +19,10 @@ export default function Layout() {
       <aside className="w-60 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-5 border-b border-slate-700">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-              <TrendingUp size={18} />
-            </div>
+            <img src="/favicon.svg" alt="Notify Me" className="w-8 h-8 rounded-lg" />
             <div>
-              <h1 className="text-sm font-bold leading-tight">SaaS Revenue</h1>
-              <p className="text-[11px] text-slate-400">Simulator & Tracker</p>
+              <h1 className="text-sm font-bold leading-tight">Notify Me</h1>
+              <p className="text-[11px] text-slate-400">Target Page</p>
             </div>
           </div>
         </div>

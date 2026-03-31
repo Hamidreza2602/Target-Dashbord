@@ -20,15 +20,15 @@ export default function App() {
           </>
         ) : (
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/simulator" replace />} />
+            <Route index element={<Navigate to="/targets" replace />} />
             <Route path="simulator" element={<SimulatorPage />} />
             <Route path="targets" element={<TargetsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             {currentUser.role === 'admin' && (
               <Route path="admin" element={<AdminPage />} />
             )}
-            <Route path="login" element={<Navigate to="/simulator" replace />} />
-            <Route path="*" element={<Navigate to="/simulator" replace />} />
+            <Route path="login" element={<Navigate to="/targets" replace />} />
+            <Route path="*" element={<Navigate to="/targets" replace />} />
           </Route>
         )}
       </Routes>

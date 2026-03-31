@@ -15,7 +15,7 @@ export default function LoginPage() {
     setError('');
     const success = login(username, password);
     if (success) {
-      navigate('/simulator', { replace: true });
+      navigate('/targets', { replace: true });
     } else {
       setError('Invalid username or password');
     }
@@ -26,11 +26,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="w-14 h-14 bg-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <TrendingUp size={28} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-white">SaaS Revenue</h1>
-          <p className="text-slate-400 text-sm mt-1">Simulator & Tracker</p>
+          <img src="/favicon.svg" alt="Notify Me" className="w-14 h-14 rounded-2xl mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-white">Notify Me</h1>
+          <p className="text-slate-400 text-sm mt-1">Target Page</p>
         </div>
 
         {/* Login Card */}
