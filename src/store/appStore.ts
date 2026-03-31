@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { Scenario, TargetPlan, TargetVersion, TargetMetric, TargetMetricPeriod, ActualMetricObservation, BaselineSnapshot, DriverConfig, ForecastMonth, Objective, TargetPathType, Directionality, MetricUnit } from '../types';
 import { mockApp, mockBaseline, mockScenario, mockScenarioImprovedChurn, mockTargetPlan, mockTargetVersion1, mockActuals } from '../data/mockData';
 import { runForecast, createDefaultDrivers, ForecastWarning } from '../engine/forecastEngine';
@@ -95,7 +96,9 @@ const _lastHistMonth = _allHistMonths[_allHistMonths.length - 1] ?? format(new D
 const defaultStart = format(addMonths(new Date(_lastHistMonth + '-02'), 1), 'yyyy-MM');
 const defaultEnd   = format(addMonths(new Date(defaultStart   + '-02'), 12), 'yyyy-MM');
 
-export const useAppStore = create<AppState>((set, get) => {
+export const useAppStore = create<AppState>()(
+  persist(
+  (set, get) => {
   const initialDrivers = createDefaultDrivers(mockBaseline);
   const initialForecast = runForecast({
     baseline: mockBaseline,
@@ -629,4 +632,27 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ targetVersions: updatedVersions });
     },
   };
-});
+  },
+  {
+    name: 'saas-revenue-store',
+    // Only persist data state, not computed forecasts (those are re-derived)
+    partialize: (state) => ({
+      currentUser: state.currentUser,
+      scenarios: state.scenarios,
+      activeScenarioId: state.activeScenarioId,
+      drivers: state.drivers,
+      forecastStartDate: state.forecastStartDate,
+      forecastEndDate: state.forecastEndDate,
+      targetPlans: state.targetPlans,
+      targetVersions: state.targetVersions,
+      actuals: state.actuals,
+      driverProjTypes: state.driverProjTypes,
+    }),
+    // Re-run simulation after hydration so forecastMonths is populated
+    onRehydrateStorage: () => (state) => {
+      if (state) {
+        state.runSimulation();
+      }
+    },
+  }
+));

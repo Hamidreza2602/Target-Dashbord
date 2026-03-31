@@ -398,9 +398,9 @@ export default function TargetBizMetricsTab({ version, isAdmin = true }: { versi
                           <div className="flex flex-col items-center gap-0.5">
                             <input
                               type="number"
-                              disabled={!isPast || !isAdmin}
+                              disabled={!isPast}
                               className={`w-20 text-center text-xs border rounded px-1 py-0.5
-                                ${(!isPast || !isAdmin) ? 'bg-gray-50 text-gray-300 border-gray-100' :
+                                ${!isPast ? 'bg-gray-50 text-gray-300 border-gray-100' :
                                   isBad ? 'border-red-300 bg-red-50 text-red-700' :
                                   isGood ? 'border-emerald-300 bg-emerald-50 text-emerald-700' :
                                   'border-gray-200'}`}
