@@ -1,5 +1,40 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
+
+// Custom storage that syncs with Vercel Blob API (cross-device)
+// Falls back to localStorage for local dev / offline
+const apiStorage: StateStorage = {
+  getItem: async (name: string): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/state');
+      if (!res.ok) throw new Error('API error');
+      const data = await res.json();
+      if (data) return JSON.stringify({ state: data, version: 0 });
+      return localStorage.getItem(name);
+    } catch {
+      return localStorage.getItem(name);
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    // Save to localStorage immediately
+    localStorage.setItem(name, value);
+    // Debounced save to API
+    clearTimeout((apiStorage as any)._timer);
+    (apiStorage as any)._timer = setTimeout(async () => {
+      try {
+        const parsed = JSON.parse(value);
+        await fetch('/api/state', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed.state),
+        });
+      } catch { /* ignore API errors, localStorage is fallback */ }
+    }, 1000);
+  },
+  removeItem: (name: string): void => {
+    localStorage.removeItem(name);
+  },
+};
 import { Scenario, TargetPlan, TargetVersion, TargetMetric, TargetMetricPeriod, ActualMetricObservation, BaselineSnapshot, DriverConfig, ForecastMonth, Objective, TargetPathType, Directionality, MetricUnit } from '../types';
 import { mockApp, mockBaseline, mockScenario, mockScenarioImprovedChurn, mockTargetPlan, mockTargetVersion1, mockActuals } from '../data/mockData';
 import { runForecast, createDefaultDrivers, ForecastWarning } from '../engine/forecastEngine';
@@ -635,6 +670,8 @@ export const useAppStore = create<AppState>()(
   },
   {
     name: 'saas-revenue-store',
+    // Use API-backed storage for cross-device sync (falls back to localStorage)
+    storage: createJSONStorage(() => apiStorage),
     // Persist shared data — NOT currentUser (each session manages its own login)
     partialize: (state) => ({
       scenarios: state.scenarios,
