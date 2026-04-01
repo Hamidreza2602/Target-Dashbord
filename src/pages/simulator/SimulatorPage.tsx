@@ -237,6 +237,7 @@ export default function SimulatorPage() {
                   <CompactDriverRow
                     key={driver.key}
                     driver={driver}
+                    driverKey={driver.key}
                     months={forecastMonths.map(m => m.month)}
                     onGlobalChange={(val) => updateDriver(driver.key, val)}
                     onBatchMonthChange={vals => batchUpdateDriverMonths(driver.key, vals)}
@@ -352,9 +353,10 @@ function SummaryCard({ label, value, change }: { label: string; value: string; c
 }
 
 function CompactDriverRow({
-  driver, months, onGlobalChange, onBatchMonthChange, isMonthlyOpen, onToggleMonthly,
+  driver, driverKey, months, onGlobalChange, onBatchMonthChange, isMonthlyOpen, onToggleMonthly,
 }: {
   driver: DriverConfig;
+  driverKey: string;
   months: string[];
   onGlobalChange: (val: number) => void;
   onBatchMonthChange: (vals: Record<string, number>) => void;
@@ -426,17 +428,95 @@ function CompactDriverRow({
       ? 'text-red-500'
       : 'text-gray-400';
 
-  // Slider → map through power curve → set months
+  // Get stored projection type for this driver
+  const { driverProjTypes } = useAppStore();
+  const storedProjType = (driverProjTypes[driverKey] ?? 'seasonal') as 'linear' | 'curve' | 'seasonal' | 'immediate';
+
+  // Slider → compute desired avg → find endpoint via projection → batch set months
   const handleSliderChange = (rawSlider: number) => {
     const pct = sliderToPct(rawSlider);
     const desiredAvg = trailingAvg * (1 + pct / 100);
     const step = driver.step ?? 1;
-    const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
-    const clamped = Math.max(driver.min ?? -Infinity, Math.min(driver.max ?? Infinity, snapped));
-    onGlobalChange(clamped);
-    const newValues: Record<string, number> = {};
-    months.forEach(m => { newValues[m] = clamped; });
-    onBatchMonthChange(newValues);
+    const dMin = driver.min ?? 0;
+    const dMax = driver.max ?? Infinity;
+
+    // Start value for projection
+    const lastHKey = histMonths[histMonths.length - 1];
+    const startVal = lastHKey !== undefined && historyData[lastHKey] !== undefined
+      ? historyData[lastHKey] : trailingAvg;
+    const n = months.length;
+
+    if (storedProjType === 'immediate' || n === 0) {
+      // Immediate: all months = desiredAvg
+      const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
+      const clamped = Math.max(dMin, Math.min(dMax, snapped));
+      onGlobalChange(clamped);
+      const vals: Record<string, number> = {};
+      months.forEach(m => { vals[m] = clamped; });
+      onBatchMonthChange(vals);
+      return;
+    }
+
+    // Compute endpoint for desired avg using binary search
+    let lo = -(Math.abs(startVal) * 12 + 10000);
+    let hi = Math.abs(startVal) * 12 + 10000;
+    const computeAvg = (endVal: number) => {
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        const t = n > 1 ? i / (n - 1) : 1;
+        sum += startVal + (endVal - startVal) * t;
+      }
+      return sum / n;
+    };
+    for (let iter = 0; iter < 50; iter++) {
+      const mid = (lo + hi) / 2;
+      const avg = computeAvg(mid);
+      if (Math.abs(avg - desiredAvg) < 0.5) break;
+      if (avg < desiredAvg) lo = mid; else hi = mid;
+    }
+    const endpoint = (lo + hi) / 2;
+    const snapped = step >= 1 ? Math.round(endpoint) : parseFloat(endpoint.toFixed(1));
+    onGlobalChange(Math.max(dMin, Math.min(dMax, snapped)));
+
+    // Generate projection values
+    const round = (v: number) => isInteger ? Math.round(v) : Math.round(v * 100) / 100;
+    const vals: Record<string, number> = {};
+    if (storedProjType === 'curve') {
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        vals[m] = Math.max(dMin, Math.min(dMax, round(startVal + (snapped - startVal) * t * t)));
+      });
+    } else if (storedProjType === 'seasonal') {
+      const allHistVals = Object.values(historyData);
+      const overallAvg = allHistVals.length > 0 ? allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length : startVal;
+      const byMoY: Record<number, number[]> = {};
+      Object.entries(historyData).forEach(([month, val]) => {
+        const moy = parseInt(month.split('-')[1]) - 1;
+        if (!byMoY[moy]) byMoY[moy] = [];
+        byMoY[moy].push(val);
+      });
+      const seasonalAdj: Record<number, number> = {};
+      for (let i = 0; i < 12; i++) {
+        seasonalAdj[i] = byMoY[i] ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg : 0;
+      }
+      const raw = months.map((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        const base = startVal + (snapped - startVal) * t;
+        const moy = parseInt(m.split('-')[1]) - 1;
+        return base + (seasonalAdj[moy] ?? 0);
+      });
+      const endOffset = snapped - raw[raw.length - 1];
+      months.forEach((m, i) => {
+        vals[m] = Math.max(dMin, Math.min(dMax, round(raw[i] + endOffset)));
+      });
+    } else {
+      // Linear
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        vals[m] = Math.max(dMin, Math.min(dMax, round(startVal + (snapped - startVal) * t)));
+      });
+    }
+    onBatchMonthChange(vals);
   };
 
   // Track gradient: gray by default; color only the filled segment from center → thumb
