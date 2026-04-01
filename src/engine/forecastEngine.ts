@@ -221,12 +221,15 @@ export function runForecast(input: ForecastInput): ForecastResult {
 
     const churnedMrr    = oldPaidChurned * arpuRecurringOld;
     const backToFreeMrr = oldBackToFree * arpuRecurringOld;
+    // MRR from OLD cohort only (surviving old paid + old free mid-month converts)
+    const oldCohortMrr = arpuRecurringOld * (oldPaidCount + oldFreeConvCount);
     // Monthly retention ratios → annualized (compounded over 12 months)
     const monthlyGrr = prevMrr > 0
       ? (prevMrr - churnedMrr - backToFreeMrr) / prevMrr
       : 1;
+    // NRR: old cohort MRR (includes expansion from ARPU changes) / previous MRR
     const monthlyNrr = prevMrr > 0
-      ? mrrRecurring / prevMrr
+      ? oldCohortMrr / prevMrr
       : 1;
     const grr = Math.pow(monthlyGrr, 12) * 100;
     const nrr = Math.pow(monthlyNrr, 12) * 100;
@@ -279,6 +282,11 @@ export function runForecast(input: ForecastInput): ForecastResult {
 
       totalRevenue: Math.round(totalRevenue),
       arr:          Math.round(arr),
+
+      mrrNewCustomers:  Math.round(newInstallCount * arpuRecurringNew),
+      mrrExpansion:     Math.round(oldFreeConvCount * arpuRecurringOld),
+      mrrChurned:       Math.round(churnedMrr),
+      mrrContraction:   Math.round(backToFreeMrr),
 
       freeChurnRateNew:      Math.round(freeChurnRateNew * 10000) / 100,
       freeChurnRateOld:      Math.round(freeChurnRateOld * 10000) / 100,

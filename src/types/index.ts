@@ -209,6 +209,12 @@ export interface ForecastMonth {
   totalRevenue: number;             // mrrRecurring + mrrPreorder + mrrSMS
   arr: number;                      // totalRevenue * 12
 
+  // === MRR Movement (month-over-month components) ===
+  mrrNewCustomers: number;          // newInstallCount * arpuRecurringNew
+  mrrExpansion: number;             // oldFreeConvCount * arpuRecurringOld (old free→paid)
+  mrrChurned: number;               // oldPaidChurned * arpuRecurringOld (positive number = loss)
+  mrrContraction: number;           // oldBackToFree * arpuRecurringOld (positive number = loss)
+
   // === Rates (for display) ===
   freeChurnRateNew: number;
   freeChurnRateOld: number;
