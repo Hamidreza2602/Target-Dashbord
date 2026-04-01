@@ -44,7 +44,7 @@ export default function LoginPage() {
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="admin or member"
+                placeholder="Username"
                 autoFocus
               />
             </div>
@@ -71,25 +71,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-5 pt-4 border-t border-gray-100">
-            <p className="text-[10px] text-gray-400 text-center">Demo Accounts</p>
-            <div className="flex gap-3 mt-2">
-              <button
-                type="button"
-                onClick={() => { setUsername('admin'); setPassword('admin123'); }}
-                className="flex-1 text-center text-[10px] px-2 py-1.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-              >
-                <span className="font-bold">Admin</span><br />admin / admin123
-              </button>
-              <button
-                type="button"
-                onClick={() => { setUsername('member'); setPassword('member123'); }}
-                className="flex-1 text-center text-[10px] px-2 py-1.5 rounded bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
-              >
-                <span className="font-bold">Member</span><br />member / member123
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

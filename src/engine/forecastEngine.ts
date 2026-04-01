@@ -54,7 +54,12 @@ function drv(drivers: Record<string, DriverConfig>, key: string, month: string, 
  *
  * ### MRR SMS / Preorder:
  *   MRRSMS[m]      = PaidUser[m] × SMSPercentage × ARPUSMS
- *   MRRPreorder[m] = PaidUser[m] × PreorderPercentage × ARPUPreorder
+ *
+ *   PreorderPayingUsers[0] = baseline.customers × baseline.preorderPct
+ *   PreorderPayingUsers[m] = PreorderPayingUsers[m-1] × (1 − paidChurnRateOld − backToFreeRateOld)
+ *   PreorderPercentage[m]  = PreorderPayingUsers[m] / PaidUser[m]   ← auto-calculated, not a driver
+ *   MRRPreorder[m]         = PaidUser[m] × PreorderPercentage[m] × ARPUPreorder
+ *
  *   MRR[m]         = MRRRecurring[m] + MRRSMS[m] + MRRPreorder[m]
  *
  * ### Notes:
@@ -73,6 +78,10 @@ export function runForecast(input: ForecastInput): ForecastResult {
   let prevMrrRecurring = baseline.metricValues.mrr
     || (customers * (baseline.metricValues.arpu_recurring || 22));
   const arpuFallback = baseline.metricValues.arpu_recurring || 22;
+
+  // PreOrder paying users — absolute count, decays by old-paid churn + back-to-free each month
+  const baselinePreorderPct = (baseline.metricValues.preorder_customers_pct ?? 11.3) / 100;
+  let preorderPayingUsers = customers * baselinePreorderPct;
 
   // Parse startDate as LOCAL time (not UTC) to avoid timezone-shift issues.
   // 'YYYY-MM-DD' parsed via new Date() is UTC midnight, which in behind-UTC
@@ -114,7 +123,6 @@ export function runForecast(input: ForecastInput): ForecastResult {
 
     // Revenue drivers
     const arpuRecurringNew  = drv(drivers, 'arpu_recurring_new', month, arpuFallback * 1.05);
-    const preorderPct       = drv(drivers, 'preorder_customers_pct', month, 20) / 100;
     const arpuPreorder      = drv(drivers, 'arpu_preorder', month, 5.0);
     const smsPct            = drv(drivers, 'sms_customers_pct', month, 10) / 100;
     const arpuSMS           = drv(drivers, 'arpu_sms', month, 3.5);
@@ -169,6 +177,13 @@ export function runForecast(input: ForecastInput): ForecastResult {
       warnings.push({ month, metric: 'customers', message: 'Customers went negative, clamped to 0', severity: 'error' });
       customers = 0;
     }
+
+    // ═══════════════════════════════════════
+    // 5b. PREORDER PAYING USERS — decays by old churn + back-to-free
+    // ═══════════════════════════════════════
+    preorderPayingUsers = preorderPayingUsers * (1 - paidChurnRateOld - backToFreeRateOld);
+    preorderPayingUsers = Math.max(0, preorderPayingUsers);
+    const preorderPct = customers > 0 ? preorderPayingUsers / customers : 0;
 
     // ═══════════════════════════════════════
     // 6. REVENUE
@@ -317,8 +332,7 @@ export function createDefaultDrivers(baseline: BaselineSnapshot): Record<string,
     // === Monetization: Recurring (new customers — old is derived from prevMRR/prevCustomers) ===
     { key: 'arpu_recurring_new',    label: 'ARPU Recurring (New Cust)', category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 41,    min: 0, max: 5000,  step: 0.5 },
 
-    // === Monetization: Preorder — ARPU = Preorder Rev / (preorderPct × customers) = 60349 / (11.3% × 7980) ≈ $67 ===
-    { key: 'preorder_customers_pct', label: 'Preorder Customers %',     category: 'monetization',    unit: 'percent',  baselineKey: '_',                fallback: 11.3,  min: 0, max: 100,  step: 0.5 },
+    // === Monetization: Preorder — preorder_customers_pct is auto-calculated (decays by old churn + back-to-free) ===
     { key: 'arpu_preorder',          label: 'ARPU Preorder',            category: 'monetization',    unit: 'currency', baselineKey: '_',                fallback: 64,    min: 0, max: 5000,  step: 1 },
 
     // === Monetization: SMS — ARPU = SMS Rev / (smsPct × customers) = 51932 / (33.8% × 7980) ≈ $19 ===

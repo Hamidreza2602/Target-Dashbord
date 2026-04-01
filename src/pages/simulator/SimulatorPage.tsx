@@ -446,8 +446,8 @@ function CompactDriverRow({
       ? historyData[lastHKey] : trailingAvg;
     const n = months.length;
 
-    if (storedProjType === 'immediate' || n === 0) {
-      // Immediate: all months = desiredAvg
+    if (storedProjType === 'immediate' || n === 0 || desiredAvg <= dMin) {
+      // Immediate or at min: all months = desiredAvg
       const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
       const clamped = Math.max(dMin, Math.min(dMax, snapped));
       onGlobalChange(clamped);
@@ -464,7 +464,7 @@ function CompactDriverRow({
       let sum = 0;
       for (let i = 0; i < n; i++) {
         const t = n > 1 ? i / (n - 1) : 1;
-        sum += startVal + (endVal - startVal) * t;
+        sum += Math.max(dMin, Math.min(dMax, startVal + (endVal - startVal) * t));
       }
       return sum / n;
     };
@@ -766,22 +766,21 @@ function MonthlyEditorPanel({
     const n = months.length;
 
     const computeProjectionAvg = (endVal: number): number => {
-      if (n === 0) return endVal;
+      if (n === 0) return Math.max(dMin, Math.min(dMax, endVal));
       let sum = 0;
       if (projType === 'immediate') {
-        return endVal;
+        return Math.max(dMin, Math.min(dMax, endVal));
       } else if (projType === 'linear') {
         for (let i = 0; i < n; i++) {
           const t = n > 1 ? i / (n - 1) : 1;
-          sum += startVal + (endVal - startVal) * t;
+          sum += Math.max(dMin, Math.min(dMax, startVal + (endVal - startVal) * t));
         }
       } else if (projType === 'curve') {
         for (let i = 0; i < n; i++) {
           const t = n > 1 ? i / (n - 1) : 1;
-          sum += startVal + (endVal - startVal) * t * t;
+          sum += Math.max(dMin, Math.min(dMax, startVal + (endVal - startVal) * t * t));
         }
       } else {
-        // seasonal: linear + seasonal offsets (same logic as runProjection)
         const allHistVals = Object.values(historyData);
         const overallAvg = allHistVals.length > 0 ? allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length : startVal;
         const byMoY: Record<number, number[]> = {};
@@ -802,18 +801,21 @@ function MonthlyEditorPanel({
           raw.push(base + (seasonalAdj[moy] ?? 0));
         }
         const endOffset = endVal - raw[raw.length - 1];
-        for (let i = 0; i < n; i++) sum += raw[i] + endOffset;
+        for (let i = 0; i < n; i++) sum += Math.max(dMin, Math.min(dMax, raw[i] + endOffset));
       }
       return sum / n;
     };
 
-    // For immediate, endpoint = desiredAvg
-    if (projType === 'immediate') {
-      const snapped = step >= 1 ? Math.round(desiredAvg) : parseFloat(desiredAvg.toFixed(1));
+    // For immediate, or when desired avg ≤ min (can't achieve with ramp), set all months directly
+    if (projType === 'immediate' || desiredAvg <= dMin) {
+      const snapped = step >= 1 ? Math.round(Math.max(dMin, desiredAvg)) : parseFloat(Math.max(dMin, desiredAvg).toFixed(1));
       const clamped = Math.max(dMin, Math.min(dMax, snapped));
       setTargetValue(clamped);
       onGlobalChange(clamped);
-      runProjection(projType, clamped);
+      // Set all months directly to achieve exact avg
+      const newValues: Record<string, number> = {};
+      months.forEach(m => { newValues[m] = clamped; });
+      onBatchMonthChange(newValues);
       return;
     }
 
@@ -1072,19 +1074,23 @@ function MonthlyEditorPanel({
       {/* Chart */}
       {chartData.length > 0 && (
         <div className="mb-4 bg-white rounded-lg border border-gray-100 p-3">
-          <div className="flex items-center gap-4 mb-1 text-[10px] text-gray-500">
-            <span className="flex items-center gap-1"><span className="inline-block w-6 h-0.5 bg-blue-500" /> Historical (actual)</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-6 border-t-2 border-dashed border-purple-500" /> Forecast</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-6 border-t border-dashed border-amber-500" /> Fwd Avg ({unitLabel === '$' ? `$${forwardDisplay}` : `${forwardDisplay}${unitLabel}`})</span>
+          <div className="flex items-center gap-3 mb-1 text-[10px] text-gray-500">
+            <span className="flex items-center gap-1"><span className="inline-block w-5 h-0.5 bg-blue-500" /> Historical</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-5 border-t-2 border-dashed border-purple-500" /> Forecast</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-5 border-t border-dashed border-amber-500" /> Fwd: <strong className="text-amber-700">{unitLabel === '$' ? `$${forwardDisplay}` : `${forwardDisplay}${unitLabel}`}</strong></span>
+            <span className="flex items-center gap-1"><span className="inline-block w-5 border-t border-dashed border-slate-400" /> 6M: <strong className="text-slate-600">{unitLabel === '$' ? `$${trailingDisplay}` : `${trailingDisplay}${unitLabel}`}</strong></span>
             <span className="ml-auto flex items-center gap-1 text-purple-400 italic">drag dots ↕</span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="month" tick={{ fontSize: 9 }} />
-              <YAxis tick={{ fontSize: 9 }} width={40}
+              <YAxis tick={{ fontSize: 9 }} width={50}
                 domain={[chartYDomain.min, chartYDomain.max]}
-                tickFormatter={v => unitLabel === '$' ? `$${v}` : `${v}${unitLabel}`} />
+                tickFormatter={v => {
+                  const val = unitLabel === '%' ? `${Number(v).toFixed(1)}%` : unitLabel === '$' ? `$${Math.round(v)}` : Math.round(v).toString();
+                  return val;
+                }} />
               <Tooltip contentStyle={{ fontSize: 11 }}
                 formatter={(v: any) => [`${unitLabel === '$' ? '$' : ''}${v}${unitLabel !== '$' ? unitLabel : ''}`, '']} />
               {refLineLabel && (
@@ -1092,14 +1098,8 @@ function MonthlyEditorPanel({
                   label={{ value: 'Now', position: 'top', fontSize: 9, fill: '#94a3b8' }} />
               )}
               {/* Average reference line across forecast period */}
-              {/* Forward average line */}
-              <ReferenceLine y={forwardAvg} stroke="#f59e0b" strokeDasharray="6 3" strokeWidth={1.5}
-                label={{ value: `Fwd: ${isInteger ? Math.round(forwardAvg) : forwardAvg.toFixed(1)}`, position: 'right', fontSize: 9, fill: '#d97706' }}
-                ifOverflow="extendDomain" />
-              {/* Trailing 6M average line */}
-              <ReferenceLine y={trailingAvg} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth={1}
-                label={{ value: `6M: ${isInteger ? Math.round(trailingAvg) : trailingAvg.toFixed(1)}`, position: 'left', fontSize: 9, fill: '#64748b' }}
-                ifOverflow="extendDomain" />
+              <ReferenceLine y={forwardAvg} stroke="#f59e0b" strokeDasharray="6 3" strokeWidth={1.5} ifOverflow="extendDomain" />
+              <ReferenceLine y={trailingAvg} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth={1} ifOverflow="extendDomain" />
               <Line type="monotone" dataKey="historical" stroke="#3b82f6" strokeWidth={2}
                 dot={{ r: 2, fill: '#3b82f6' }} connectNulls={false} isAnimationActive={false} name="Historical" />
               <Line type="monotone" dataKey="forecast" stroke="#8b5cf6" strokeWidth={2}

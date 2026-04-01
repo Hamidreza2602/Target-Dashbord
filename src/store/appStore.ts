@@ -50,12 +50,13 @@ export interface CurrentUser {
 }
 
 const USERS: Record<string, { password: string; role: UserRole; name: string }> = {
-  admin: { password: 'admin123', role: 'admin', name: 'Admin' },
+  admin: { password: 'Notify@2026!Secure', role: 'admin', name: 'Admin' },
   member: { password: 'member123', role: 'member', name: 'Team Member' },
 };
 
 interface AppState {
   // Auth
+  _hasHydrated: boolean;
   currentUser: CurrentUser | null;
   login: (username: string, password: string) => boolean;
   logout: () => void;
@@ -144,6 +145,7 @@ export const useAppStore = create<AppState>()(
 
   return {
     // Auth
+    _hasHydrated: false,
     currentUser: null,
     login: (username, password) => {
       const user = USERS[username];
@@ -672,8 +674,9 @@ export const useAppStore = create<AppState>()(
     name: 'saas-revenue-store',
     // Use API-backed storage for cross-device sync (falls back to localStorage)
     storage: createJSONStorage(() => apiStorage),
-    // Persist shared data — NOT currentUser (each session manages its own login)
+    // Persist shared data + currentUser (so direct URL navigation works after login)
     partialize: (state) => ({
+      currentUser: state.currentUser,
       scenarios: state.scenarios,
       activeScenarioId: state.activeScenarioId,
       drivers: state.drivers,
@@ -688,6 +691,7 @@ export const useAppStore = create<AppState>()(
     onRehydrateStorage: () => (state) => {
       if (state) {
         state.runSimulation();
+        useAppStore.setState({ _hasHydrated: true });
       }
     },
   }
