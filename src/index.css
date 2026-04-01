@@ -94,4 +94,15 @@
   .delta-slider::-moz-range-track {
     background: transparent;
   }
+  .delta-slider:focus {
+    outline: none;
+  }
+  .delta-slider:focus-visible::-webkit-slider-thumb {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .delta-slider:focus-visible::-moz-range-thumb {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 1px 3px rgba(0,0,0,0.3);
+  }
 }

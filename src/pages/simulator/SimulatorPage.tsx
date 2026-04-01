@@ -491,7 +491,7 @@ function CompactDriverRow({
               value={sliderPct}
               min={SLIDER_MIN}
               max={SLIDER_MAX}
-              step={0.1}
+              step={1}
               onChange={e => handleSliderChange(parseFloat(e.target.value))}
               className="delta-slider"
             />
@@ -578,16 +578,25 @@ function MonthlyEditorPanel({
       return result;
     }
 
-    // For linear: avg = (start + end) / 2 = trailingAvg → end = 2 * trailingAvg - start
-    const endpoint = 2 * trailingAvg - startVal;
     const result: Record<string, number> = {};
 
     if (projType === 'curve') {
+      // For curve (t²): avg ≈ start + (end-start) * Σ(t²)/n
+      // Compute the actual sum factor
+      const n1 = n > 1 ? n - 1 : 1;
+      let sumT2 = 0;
+      for (let i = 0; i < n; i++) { const t = i / n1; sumT2 += t * t; }
+      const avgFactor = sumT2 / n; // ≈ 0.33 for large n
+      // avg = start + (end-start) * avgFactor = trailingAvg
+      // end = start + (trailingAvg - start) / avgFactor
+      const endpointCurve = avgFactor > 0.001 ? startVal + (trailingAvg - startVal) / avgFactor : trailingAvg;
       months.forEach((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
-        result[m] = Math.round((startVal + (endpoint - startVal) * t * t) * 100) / 100;
+        result[m] = Math.round((startVal + (endpointCurve - startVal) * t * t) * 100) / 100;
       });
     } else if (projType === 'seasonal') {
+      // For linear base: avg = (start + end) / 2 → end = 2 * trailingAvg - start
+      const endpoint = 2 * trailingAvg - startVal;
       // Trend Learning: linear + seasonal offsets
       const allHistVals = Object.values(historyData);
       const overallAvg = allHistVals.length > 0 ? allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length : startVal;
@@ -614,10 +623,11 @@ function MonthlyEditorPanel({
         result[m] = Math.round((raw[i] + offset) * 100) / 100;
       });
     } else {
-      // Linear
+      // Linear: avg = (start + end) / 2 → end = 2 * trailingAvg - start
+      const endpointLinear = 2 * trailingAvg - startVal;
       months.forEach((m, i) => {
         const t = n > 1 ? i / (n - 1) : 1;
-        result[m] = Math.round((startVal + (endpoint - startVal) * t) * 100) / 100;
+        result[m] = Math.round((startVal + (endpointLinear - startVal) * t) * 100) / 100;
       });
     }
     return result;
@@ -1051,7 +1061,7 @@ function MonthlyEditorPanel({
             <input
               type="range"
               value={gaugeSliderVal}
-              min={GAUGE_MIN} max={GAUGE_MAX} step={isInteger ? 1 : 0.1}
+              min={GAUGE_MIN} max={GAUGE_MAX} step={1}
               onChange={e => handleTargetGauge(parseFloat(e.target.value))}
               className="delta-slider"
             />
