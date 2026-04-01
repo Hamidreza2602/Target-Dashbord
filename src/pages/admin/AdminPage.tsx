@@ -181,7 +181,10 @@ export default function AdminPage() {
                   <p><span className="text-blue-600">newInstallCount</span> = newConvertedToPaid × (1 − paidUserChurnNew)</p>
                   <p><span className="text-blue-600">mrrRecurring</span> = arpuRecurringOld × (oldPaidCount + oldFreeConvCount) + newInstallCount × arpuRecurringNew</p>
                   <p><span className="text-blue-600">mrrSMS</span> = paidUser[m] × smsCustomersPct × arpuSMS</p>
-                  <p><span className="text-blue-600">mrrPreorder</span> = paidUser[m] × preorderCustomersPct × arpuPreorder</p>
+                  <p><span className="text-blue-600">preorderPayingUsers[0]</span> = baseline.customers × baseline.preorderPct</p>
+                  <p><span className="text-blue-600">preorderPayingUsers[m]</span> = preorderPayingUsers[m-1] × (1 − paidChurnOld − backToFreeOld)</p>
+                  <p><span className="text-blue-600">preorderPct[m]</span> = preorderPayingUsers[m] / paidUser[m]</p>
+                  <p><span className="text-blue-600">mrrPreorder</span> = paidUser[m] × preorderPct[m] × arpuPreorder</p>
                   <p><span className="text-blue-600">MRR[m]</span> = mrrRecurring + mrrSMS + mrrPreorder</p>
                   <p><span className="text-blue-600">ARR</span> = MRR[m] × 12</p>
                   <p><span className="text-blue-600">derivedARPU</span> = mrrRecurring / paidUser[m]</p>
