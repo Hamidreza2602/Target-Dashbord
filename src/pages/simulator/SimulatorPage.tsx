@@ -551,16 +551,77 @@ function MonthlyEditorPanel({
     : panelBaseline;
   const trailingDisplay = isInteger ? Math.round(trailingAvg) : Math.round(trailingAvg * 10) / 10;
 
-  // Effective monthly values: use trailingAvg as fallback when no overrides
-  // so that untouched params show 0% change (forward avg = trailing avg)
+  // Effective monthly values: when monthlyValues are set, use them.
+  // When empty, generate a default projection based on projType that
+  // preserves avg = trailingAvg but follows the natural shape.
   const effectiveMonthlyValues = useMemo(() => {
-    const fallback = trailingAvg;
+    const hasOverridesForMonth = months.some(m => driver.monthlyValues[m] !== undefined);
+    if (hasOverridesForMonth) {
+      const result: Record<string, number> = {};
+      months.forEach(m => {
+        result[m] = driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : trailingAvg;
+      });
+      return result;
+    }
+
+    // No overrides: generate default shape from last historical → endpoint
+    // where endpoint is computed so avg of projection = trailingAvg
+    const lastHKey = allHistMonthsSorted[allHistMonthsSorted.length - 1];
+    const startVal = lastHKey !== undefined && historyData[lastHKey] !== undefined
+      ? historyData[lastHKey] : trailingAvg;
+    const n = months.length;
+
+    if (n === 0 || projType === 'immediate' || Math.abs(startVal - trailingAvg) < 0.01) {
+      // Flat — either immediate projection or start = avg (no shape needed)
+      const result: Record<string, number> = {};
+      months.forEach(m => { result[m] = trailingAvg; });
+      return result;
+    }
+
+    // For linear: avg = (start + end) / 2 = trailingAvg → end = 2 * trailingAvg - start
+    const endpoint = 2 * trailingAvg - startVal;
     const result: Record<string, number> = {};
-    months.forEach(m => {
-      result[m] = driver.monthlyValues[m] !== undefined ? driver.monthlyValues[m] : fallback;
-    });
+
+    if (projType === 'curve') {
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        result[m] = Math.round((startVal + (endpoint - startVal) * t * t) * 100) / 100;
+      });
+    } else if (projType === 'seasonal') {
+      // Trend Learning: linear + seasonal offsets
+      const allHistVals = Object.values(historyData);
+      const overallAvg = allHistVals.length > 0 ? allHistVals.reduce((a, b) => a + b, 0) / allHistVals.length : startVal;
+      const byMoY: Record<number, number[]> = {};
+      Object.entries(historyData).forEach(([month, val]) => {
+        const moy = parseInt(month.split('-')[1]) - 1;
+        if (!byMoY[moy]) byMoY[moy] = [];
+        byMoY[moy].push(val);
+      });
+      const seasonalAdj: Record<number, number> = {};
+      for (let i = 0; i < 12; i++) {
+        seasonalAdj[i] = byMoY[i] ? byMoY[i].reduce((a, b) => a + b, 0) / byMoY[i].length - overallAvg : 0;
+      }
+      const raw = months.map((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        const base = startVal + (endpoint - startVal) * t;
+        const moy = parseInt(m.split('-')[1]) - 1;
+        return base + (seasonalAdj[moy] ?? 0);
+      });
+      // Adjust so avg = trailingAvg
+      const rawAvg = raw.reduce((a, b) => a + b, 0) / n;
+      const offset = trailingAvg - rawAvg;
+      months.forEach((m, i) => {
+        result[m] = Math.round((raw[i] + offset) * 100) / 100;
+      });
+    } else {
+      // Linear
+      months.forEach((m, i) => {
+        const t = n > 1 ? i / (n - 1) : 1;
+        result[m] = Math.round((startVal + (endpoint - startVal) * t) * 100) / 100;
+      });
+    }
     return result;
-  }, [driver.monthlyValues, months, trailingAvg]);
+  }, [driver.monthlyValues, months, trailingAvg, projType, allHistMonthsSorted, historyData]);
 
   // ── Forward avg (all forecast months) = "where we're heading" ──
   const allForecastVals = Object.values(effectiveMonthlyValues);
