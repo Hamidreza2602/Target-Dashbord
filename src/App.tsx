@@ -8,7 +8,10 @@ import ReportsPage from './pages/reports/ReportsPage';
 import AdminPage from './pages/admin/AdminPage';
 
 export default function App() {
+  const hasHydrated = useAppStore(s => s._hasHydrated);
   const currentUser = useAppStore(s => s.currentUser);
+
+  if (!hasHydrated) return null;
 
   return (
     <BrowserRouter>
