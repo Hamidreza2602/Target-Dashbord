@@ -49,9 +49,11 @@ export default function SimulatorPage() {
   };
 
   // Group drivers by category
+  const AUTO_CALCULATED_DRIVERS = ['preorder_customers_pct'];
   const driversByCategory = useMemo(() => {
     const groups: Record<string, DriverConfig[]> = {};
     for (const d of Object.values(drivers)) {
+      if (AUTO_CALCULATED_DRIVERS.includes(d.key)) continue;
       if (!groups[d.category]) groups[d.category] = [];
       groups[d.category].push(d);
     }
@@ -245,6 +247,37 @@ export default function SimulatorPage() {
                     onToggleMonthly={() => setShowMonthlyEditor(showMonthlyEditor === driver.key ? null : driver.key)}
                   />
                 ))}
+                {/* Auto-calculated Preorder Customers % — read-only */}
+                {category === 'monetization' && forecastMonths.length > 0 && (() => {
+                  const first = forecastMonths[0].preorderCustomersPct;
+                  const last = forecastMonths[forecastMonths.length - 1].preorderCustomersPct;
+                  const avg = forecastMonths.reduce((s, m) => s + m.preorderCustomersPct, 0) / forecastMonths.length;
+                  return (
+                    <div className="py-2 px-3 border-b border-gray-50 bg-slate-50/60">
+                      <div className="flex items-center justify-between mb-1">
+                        <div>
+                          <span className="text-[11px] font-medium text-gray-700">Preorder Customers %</span>
+                          <span className="text-[9px] ml-1 text-slate-400 font-bold">AUTO</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="flex shrink-0" style={{ width: '120px' }}>
+                          <span className="flex-1 text-[8px] px-1.5 py-1.5 bg-gray-50 border border-gray-200 rounded-l tabular-nums whitespace-nowrap text-center" title="Start of period">
+                            <span className="text-gray-500">Start:</span> <span className="text-gray-800 font-bold">{Math.round(first * 10) / 10}%</span>
+                          </span>
+                          <span className="flex-1 text-[8px] px-1.5 py-1.5 bg-amber-50 border border-amber-200 border-l-0 rounded-r tabular-nums whitespace-nowrap text-center" title="End of period">
+                            <span className="text-amber-800 font-bold">End {Math.round(last * 10) / 10}%</span>
+                          </span>
+                        </div>
+                        <div className="flex-1 flex items-center justify-center">
+                          <span className="text-[9px] text-slate-500">
+                            Avg {Math.round(avg * 10) / 10}% — decays by churn &amp; back-to-free
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}
